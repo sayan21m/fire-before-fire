@@ -1,3 +1,9 @@
+/**
+ * Fire Before Fire — ESP32 firmware
+ *
+ * ACS712 (GPIO 34) + DS18B20 (GPIO 4) → features → rule engine + optional Gaussian NB.
+ * SoftAP dashboard from LittleFS: http://192.168.4.1 (SSID FireBeforeFire).
+ */
 #include <Arduino.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>

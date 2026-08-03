@@ -1,819 +1,1738 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="h-full">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fire Before Fire — ESP32 Node</title>
-  <!-- Bundled Tailwind + theme (works on SoftAP without internet) -->
-  <link rel="stylesheet" href="/app.css" />
-  <!-- Plotly optional: loads when client has internet -->
-  <script>
-    if (navigator.onLine) {
-      var s = document.createElement('script');
-      s.src = 'https://cdn.plot.ly/plotly-2.35.2.min.js';
-      document.head.appendChild(s);
-    }
-  </script>
-</head>
-<body class="h-full font-sans text-ink antialiased overflow-hidden">
-  <div class="app-shell">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fire Before Fire — ESP32 Node</title>
+    <!-- Bundled Tailwind + theme (works on SoftAP without internet) -->
+    <link rel="stylesheet" href="/app.css" />
+    <!-- Plotly optional: loads when client has internet -->
+    <script>
+      if (navigator.onLine) {
+        var s = document.createElement("script");
+        s.src = "https://cdn.plot.ly/plotly-2.35.2.min.js";
+        document.head.appendChild(s);
+      }
+    </script>
+  </head>
+  <body class="h-full font-sans text-ink antialiased overflow-hidden">
+    <div class="app-shell">
+      <!-- Sidebar overlay (mobile) -->
+      <div
+        id="sidebar-overlay"
+        class="sidebar-overlay fixed inset-0 z-30 hidden lg:hidden"
+        onclick="closeSidebar()"
+      ></div>
 
-    <!-- Sidebar overlay (mobile) -->
-    <div id="sidebar-overlay" class="sidebar-overlay fixed inset-0 z-30 hidden lg:hidden" onclick="closeSidebar()"></div>
-
-    <!-- SIDEBAR -->
-    <aside id="sidebar" class="fixed lg:static inset-y-0 left-0 z-40 flex shrink-0 flex-col border-r border-surface-border glass">
-      <div class="flex items-center gap-3 px-5 py-5 border-b border-surface-border">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-soft border border-accent/30 shadow-glow">
-          <svg class="h-5 w-5 text-accent-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3c-1.5 3-4 5-4 8a4 4 0 008 0c0-3-2.5-5-4-8z" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 18h6M10 21h4" />
-          </svg>
-        </div>
-        <div>
-          <div class="text-sm font-semibold tracking-wide text-ink">Fire Before Fire</div>
-          <div class="text-[11px] text-ink-dim uppercase tracking-[0.14em]">Electrical Safety</div>
-        </div>
-      </div>
-
-      <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-        <p class="px-3 mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-dim">Navigation</p>
-        <button class="nav-item active w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted" data-page="dashboard">
-          <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>
-          Dashboard
-        </button>
-        <button class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted" data-page="monitoring">
-          <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18M7 14l4-4 3 3 5-6"/></svg>
-          Monitoring
-        </button>
-        <button class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted" data-page="regions">
-          <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
-          Hardware
-        </button>
-        <button class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted" data-page="statistics">
-          <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6m6 0h10M9 19a2 2 0 002 2h6a2 2 0 002-2m0 0V9a2 2 0 00-2-2h-2a2 2 0 00-2 2v10"/></svg>
-          Statistics
-        </button>
-        <button class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted" data-page="bayesian">
-          <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-          Bayesian Analysis
-        </button>
-        <button class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted" data-page="alerts">
-          <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-          Alerts
-          <span id="alert-badge" class="ml-auto rounded-full bg-danger/20 px-2 py-0.5 text-[10px] font-semibold text-danger-muted">0</span>
-        </button>
-        <button class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted" data-page="history">
-          <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          Event History
-        </button>
-        <button class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted" data-page="settings">
-          <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          Settings
-        </button>
-      </nav>
-
-      <div class="border-t border-surface-border p-4">
-        <div class="rounded-xl border border-surface-border bg-surface-raised/60 p-3">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-dim mb-2">Hardware Node</div>
-          <div class="flex items-center gap-2">
-            <span class="status-dot status-ok animate-pulseLive"></span>
-            <span class="text-xs text-ink-muted">ESP32 SoftAP live</span>
+      <!-- SIDEBAR -->
+      <aside
+        id="sidebar"
+        class="fixed lg:static inset-y-0 left-0 z-40 flex shrink-0 flex-col border-r border-surface-border glass"
+      >
+        <div
+          class="flex items-center gap-3 px-5 py-5 border-b border-surface-border"
+        >
+          <div
+            class="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-soft border border-accent/30 shadow-glow"
+          >
+            <svg
+              class="h-5 w-5 text-accent-muted"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M12 3c-1.5 3-4 5-4 8a4 4 0 008 0c0-3-2.5-5-4-8z"
+              />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9 18h6M10 21h4"
+              />
+            </svg>
           </div>
-          <div class="mt-2 space-y-0.5 text-[11px] font-mono text-ink-dim">
-            <div>ACS712 · GPIO 34</div>
-            <div>DS18B20 · GPIO 4</div>
-            <div>AP 192.168.4.1</div>
+          <div>
+            <div class="text-sm font-semibold tracking-wide text-ink">
+              Fire Before Fire
+            </div>
+            <div class="text-[11px] text-ink-dim uppercase tracking-[0.14em]">
+              Electrical Safety
+            </div>
           </div>
         </div>
-      </div>
-    </aside>
 
-    <!-- MAIN -->
-    <div class="app-main">
-      <!-- TOP NAVBAR -->
-      <header class="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-surface-border glass px-3 sm:px-4 lg:px-6">
-        <button id="menu-btn" class="lg:hidden rounded-lg border border-surface-border p-2 text-ink-muted hover:bg-surface-hover hover:text-ink transition" onclick="openSidebar()" aria-label="Open menu">
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
-        </button>
+        <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
+          <p
+            class="px-3 mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-dim"
+          >
+            Navigation
+          </p>
+          <button
+            class="nav-item active w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted"
+            data-page="dashboard"
+          >
+            <svg
+              class="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M3 12l9-9 9 9M5 10v10h14V10"
+              />
+            </svg>
+            Dashboard
+          </button>
+          <button
+            class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted"
+            data-page="monitoring"
+          >
+            <svg
+              class="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M3 3v18h18M7 14l4-4 3 3 5-6"
+              />
+            </svg>
+            Monitoring
+          </button>
+          <button
+            class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted"
+            data-page="regions"
+          >
+            <svg
+              class="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
+              />
+            </svg>
+            Hardware
+          </button>
+          <button
+            class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted"
+            data-page="statistics"
+          >
+            <svg
+              class="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6m6 0h10M9 19a2 2 0 002 2h6a2 2 0 002-2m0 0V9a2 2 0 00-2-2h-2a2 2 0 00-2 2v10"
+              />
+            </svg>
+            Statistics
+          </button>
+          <button
+            class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted"
+            data-page="bayesian"
+          >
+            <svg
+              class="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+              />
+            </svg>
+            Bayesian Analysis
+          </button>
+          <button
+            class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted"
+            data-page="alerts"
+          >
+            <svg
+              class="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+              />
+            </svg>
+            Alerts
+            <span
+              id="alert-badge"
+              class="ml-auto rounded-full bg-danger/20 px-2 py-0.5 text-[10px] font-semibold text-danger-muted"
+              >0</span
+            >
+          </button>
+          <button
+            class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted"
+            data-page="history"
+          >
+            <svg
+              class="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            Event History
+          </button>
+          <button
+            class="nav-item w-full flex items-center gap-3 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm text-ink-muted"
+            data-page="settings"
+          >
+            <svg
+              class="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+            </svg>
+            Settings
+          </button>
+        </nav>
 
-        <div class="min-w-0">
-          <h1 id="page-title" class="truncate text-sm font-semibold text-ink lg:text-base">Dashboard</h1>
-          <p class="hidden text-[11px] text-ink-dim sm:block">ESP32 SoftAP · ACS712 + DS18B20 · Rules + Gaussian NB</p>
+        <div class="border-t border-surface-border p-4">
+          <div
+            class="rounded-xl border border-surface-border bg-surface-raised/60 p-3"
+          >
+            <div
+              class="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-dim mb-2"
+            >
+              Hardware Node
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="status-dot status-ok animate-pulseLive"></span>
+              <span class="text-xs text-ink-muted">ESP32 SoftAP live</span>
+            </div>
+            <div class="mt-2 space-y-0.5 text-[11px] font-mono text-ink-dim">
+              <div>ACS712 · GPIO 34</div>
+              <div>DS18B20 · GPIO 4</div>
+              <div>AP 192.168.4.1</div>
+            </div>
+          </div>
         </div>
+      </aside>
 
-        <div class="ml-auto flex items-center gap-2 sm:gap-3">
-          <div class="hidden md:flex items-center gap-2 rounded-lg border border-surface-border bg-surface-raised/50 px-3 py-1.5">
-            <svg class="h-3.5 w-3.5 text-ink-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            <span id="clock" class="font-mono text-xs text-ink-muted tabular-nums">--:--:--</span>
-          </div>
-
-          <div class="flex items-center gap-2 rounded-lg border border-success/30 bg-success-soft/40 px-2.5 py-1.5">
-            <span class="status-dot status-ok animate-pulseLive"></span>
-            <span class="hidden sm:inline text-[11px] font-medium text-success-muted">Online</span>
-          </div>
-
-          <button id="theme-btn" class="rounded-lg border border-surface-border p-2 text-ink-muted hover:bg-surface-hover hover:text-ink transition" title="Theme" aria-label="Toggle theme">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+      <!-- MAIN -->
+      <div class="app-main">
+        <!-- TOP NAVBAR -->
+        <header
+          class="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-surface-border glass px-3 sm:px-4 lg:px-6"
+        >
+          <button
+            id="menu-btn"
+            class="lg:hidden rounded-lg border border-surface-border p-2 text-ink-muted hover:bg-surface-hover hover:text-ink transition"
+            onclick="openSidebar()"
+            aria-label="Open menu"
+          >
+            <svg
+              class="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M4 6h16M4 12h16M4 18h16"
+              />
+            </svg>
           </button>
 
-          <button class="relative rounded-lg border border-surface-border p-2 text-ink-muted hover:bg-surface-hover hover:text-ink transition" onclick="navigateTo('alerts')" aria-label="Notifications">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-            <span class="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-danger text-[8px] font-bold text-white" id="nav-alert-dot">0</span>
-          </button>
-        </div>
-      </header>
-
-      <!-- CONTENT -->
-      <main class="app-content">
-        <div class="content-wrap">
-
-        <!-- ==================== DASHBOARD ==================== -->
-        <section id="page-dashboard" class="page active">
-          <div class="page-header">
-            <div>
-              <p class="page-kicker">Overview</p>
-              <h2 class="page-title">Live System Snapshot</h2>
-            </div>
-            <div class="flex flex-wrap items-center gap-2 text-xs text-ink-dim">
-              <span id="live-status-dot" class="status-dot status-ok animate-pulseLive"></span>
-              <span>Live · Updated <span id="last-update" class="font-mono text-ink-muted">just now</span></span>
-              <span id="mode-badge" class="rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-muted">manual</span>
-              <span id="gnb-badge" class="rounded-md bg-surface-raised px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-dim" title="Gaussian NB pipeline">gnb: collecting</span>
-            </div>
+          <div class="min-w-0">
+            <h1
+              id="page-title"
+              class="truncate text-sm font-semibold text-ink lg:text-base"
+            >
+              Dashboard
+            </h1>
+            <p class="hidden text-[11px] text-ink-dim sm:block">
+              ESP32 SoftAP · ACS712 + DS18B20 · Rules + Gaussian NB
+            </p>
           </div>
 
-          <!-- Live prediction warnings -->
-          <div id="prediction-warnings" class="mb-4 hidden space-y-2"></div>
+          <div class="ml-auto flex items-center gap-2 sm:gap-3">
+            <div
+              class="hidden md:flex items-center gap-2 rounded-lg border border-surface-border bg-surface-raised/50 px-3 py-1.5"
+            >
+              <svg
+                class="h-3.5 w-3.5 text-ink-dim"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="1.8"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <span
+                id="clock"
+                class="font-mono text-xs text-ink-muted tabular-nums"
+                >--:--:--</span
+              >
+            </div>
 
-          <!-- Parameter threshold status strip -->
-          <div id="param-status-grid" class="param-grid"></div>
+            <div
+              class="flex items-center gap-2 rounded-lg border border-success/30 bg-success-soft/40 px-2.5 py-1.5"
+            >
+              <span class="status-dot status-ok animate-pulseLive"></span>
+              <span
+                class="hidden sm:inline text-[11px] font-medium text-success-muted"
+                >Online</span
+              >
+            </div>
 
-          <div class="kpi-grid">
-            <!-- Current -->
-            <article class="glass glass-hover kpi-card shadow-glass" data-param="current">
-              <div class="flex items-start justify-between">
+            <button
+              id="theme-btn"
+              class="rounded-lg border border-surface-border p-2 text-ink-muted hover:bg-surface-hover hover:text-ink transition"
+              title="Theme"
+              aria-label="Toggle theme"
+            >
+              <svg
+                class="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="1.8"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+                />
+              </svg>
+            </button>
+
+            <button
+              class="relative rounded-lg border border-surface-border p-2 text-ink-muted hover:bg-surface-hover hover:text-ink transition"
+              onclick="navigateTo('alerts')"
+              aria-label="Notifications"
+            >
+              <svg
+                class="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="1.8"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                />
+              </svg>
+              <span
+                class="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-danger text-[8px] font-bold text-white"
+                id="nav-alert-dot"
+                >0</span
+              >
+            </button>
+          </div>
+        </header>
+
+        <!-- CONTENT -->
+        <main class="app-content">
+          <div class="content-wrap">
+            <!-- ==================== DASHBOARD ==================== -->
+            <section id="page-dashboard" class="page active">
+              <div class="page-header">
                 <div>
-                  <p class="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Current</p>
-                  <p class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"><span id="kpi-current">0.00</span><span class="ml-1 text-sm font-normal text-ink-dim">A</span></p>
+                  <p class="page-kicker">Overview</p>
+                  <h2 class="page-title">Live System Snapshot</h2>
                 </div>
-                <span id="dot-current" class="status-dot status-idle mt-1"></span>
-              </div>
-              <div id="spark-current" class="mini-spark mt-3"></div>
-              <div class="kpi-foot">
-                <span id="lbl-current" class="text-ink-dim">waiting…</span>
-                <span id="sub-current" class="font-mono text-ink-dim">Δ — A/s</span>
-              </div>
-            </article>
-
-            <!-- Temperature -->
-            <article class="glass glass-hover kpi-card shadow-glass" data-param="temp">
-              <div class="flex items-start justify-between">
-                <div>
-                  <p class="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Temperature</p>
-                  <p class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"><span id="kpi-temp">0.0</span><span class="ml-1 text-sm font-normal text-ink-dim">°C</span></p>
-                </div>
-                <span id="dot-temp" class="status-dot status-idle mt-1"></span>
-              </div>
-              <div id="spark-temp" class="mini-spark mt-3"></div>
-              <div class="kpi-foot">
-                <span id="lbl-temp" class="text-ink-dim">waiting…</span>
-                <span id="sub-temp" class="font-mono text-ink-dim">Δ — °C/s</span>
-              </div>
-            </article>
-
-            <!-- Power -->
-            <article class="glass glass-hover kpi-card shadow-glass" data-param="power">
-              <div class="flex items-start justify-between">
-                <div>
-                  <p class="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Power</p>
-                  <p class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"><span id="kpi-power">0.00</span><span class="ml-1 text-sm font-normal text-ink-dim">kW</span></p>
-                </div>
-                <span id="dot-power" class="status-dot status-idle mt-1"></span>
-              </div>
-              <div id="spark-power" class="mini-spark mt-3"></div>
-              <div class="kpi-foot">
-                <span id="lbl-power" class="text-ink-dim">waiting…</span>
-                <span class="font-mono text-ink-dim">230 V · 1φ</span>
-              </div>
-            </article>
-
-            <!-- Current Slope -->
-            <article class="glass glass-hover kpi-card shadow-glass" data-param="currentSlope">
-              <div class="flex items-start justify-between">
-                <div>
-                  <p class="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Current Slope</p>
-                  <p class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"><span id="kpi-cslope">0.000</span><span class="ml-1 text-sm font-normal text-ink-dim">A/s</span></p>
-                </div>
-                <span id="dot-cslope" class="status-dot status-idle mt-1"></span>
-              </div>
-              <div id="spark-cslope" class="mini-spark mt-3"></div>
-              <div class="kpi-foot">
-                <span id="lbl-cslope" class="text-ink-dim">waiting…</span>
-                <span id="sub-cslope" class="font-mono text-ink-dim">thresh —</span>
-              </div>
-            </article>
-
-            <!-- Temperature Slope -->
-            <article class="glass glass-hover kpi-card shadow-glass" data-param="tempSlope">
-              <div class="flex items-start justify-between">
-                <div>
-                  <p class="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Temperature Slope</p>
-                  <p class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"><span id="kpi-tslope">0.000</span><span class="ml-1 text-sm font-normal text-ink-dim">°C/s</span></p>
-                </div>
-                <span id="dot-tslope" class="status-dot status-idle mt-1"></span>
-              </div>
-              <div id="spark-tslope" class="mini-spark mt-3"></div>
-              <div class="kpi-foot">
-                <span id="lbl-tslope" class="text-ink-dim">waiting…</span>
-                <span id="sub-tslope" class="font-mono text-ink-dim">thresh —</span>
-              </div>
-            </article>
-
-            <!-- Risk Level -->
-            <article class="glass glass-hover kpi-card shadow-glass">
-              <div class="flex items-start justify-between">
-                <div>
-                  <p class="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Risk Level</p>
-                  <p class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"><span id="kpi-risk">0</span><span class="ml-1 text-sm font-normal text-ink-dim">%</span></p>
-                </div>
-                <span id="kpi-risk-badge" class="rounded-md bg-surface-raised px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-dim">—</span>
-              </div>
-              <div class="mt-4 h-2 overflow-hidden rounded-full bg-surface-raised">
-                <div id="kpi-risk-bar" class="h-full rounded-full bg-gradient-to-r from-success via-warning to-danger" style="width:0%"></div>
-              </div>
-              <div class="mt-2 flex justify-between text-[10px] font-mono text-ink-dim">
-                <span>LOW</span><span>MOD</span><span>HIGH</span><span>CRIT</span>
-              </div>
-            </article>
-
-            <!-- Confidence -->
-            <article class="glass glass-hover kpi-card shadow-glass">
-              <div class="flex items-start justify-between">
-                <div>
-                  <p class="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Confidence</p>
-                  <p class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-accent-muted"><span id="kpi-conf">0</span><span class="ml-1 text-sm font-normal text-ink-dim">%</span></p>
-                </div>
-                <span id="dot-conf" class="status-dot status-idle mt-1"></span>
-              </div>
-              <div id="spark-conf" class="mini-spark mt-3"></div>
-              <div class="kpi-foot">
-                <span id="lbl-conf" class="text-accent-muted">collecting…</span>
-                <span id="sub-conf" class="font-mono text-ink-dim">n = 0</span>
-              </div>
-            </article>
-
-            <!-- Operating Phase -->
-            <article class="glass glass-hover kpi-card shadow-glass">
-              <div class="flex items-start justify-between">
-                <div>
-                  <p class="text-[11px] font-medium uppercase tracking-wider text-ink-dim">Operating Phase</p>
-                  <p id="kpi-phase" class="mt-1 text-2xl font-semibold text-ink">—</p>
-                </div>
-                <span id="dot-phase" class="status-dot status-idle mt-1"></span>
-              </div>
-              <div class="mt-4 flex gap-1.5">
-                <div id="phase-idle" class="phase-chip"><div class="label">Idle</div></div>
-                <div id="phase-steady" class="phase-chip"><div class="label">Steady</div></div>
-                <div id="phase-transient" class="phase-chip"><div class="label">Transient</div></div>
-                <div id="phase-fault" class="phase-chip"><div class="label">Fault</div></div>
-              </div>
-              <div id="phase-meta" class="mt-2 text-[11px] text-ink-dim leading-snug">ESP32 · ACS712 GPIO34 · DS18B20 GPIO4</div>
-            </article>
-          </div>
-
-          <!-- Hardware sensors + derived pipeline -->
-          <div class="mt-6">
-            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 class="text-sm font-semibold text-ink">Connected Hardware</h3>
-              <span class="text-[11px] text-ink-dim">Live ESP32 node</span>
-            </div>
-            <div class="sensor-grid">
-              <div class="glass sensor-card rounded-xl p-4 border-l-2 border-success">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="text-xs font-medium text-ink">Current Sensor</p>
-                  <span id="badge-acs712" class="rounded bg-success-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success-muted">Active</span>
-                </div>
-                <p class="mt-1 text-[11px] text-ink-dim">ACS712 · ADC GPIO 34 · 185 mV/A</p>
-                <p class="mt-3 font-mono text-lg text-ink"><span id="sensor-current">—</span> A</p>
-              </div>
-              <div class="glass sensor-card rounded-xl p-4 border-l-2 border-success">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="text-xs font-medium text-ink">Temperature Sensor</p>
-                  <span id="badge-ds18b20" class="rounded bg-success-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success-muted">Active</span>
-                </div>
-                <p class="mt-1 text-[11px] text-ink-dim">DS18B20 · 1-Wire GPIO 4 · 12-bit</p>
-                <p class="mt-3 font-mono text-lg text-ink"><span id="sensor-temp">—</span> °C</p>
-              </div>
-              <div class="glass sensor-card rounded-xl p-4 border-l-2 border-accent">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="text-xs font-medium text-ink">Controller</p>
-                  <span class="rounded bg-accent-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-accent-muted">ESP32</span>
-                </div>
-                <p class="mt-1 text-[11px] text-ink-dim">SoftAP FireBeforeFire · 192.168.4.1</p>
-                <p class="mt-3 font-mono text-sm text-ink-muted">Batch <span id="sensor-batch">0/60</span></p>
-              </div>
-              <div class="glass sensor-card rounded-xl p-4 border-l-2 border-warning">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="text-xs font-medium text-ink">Prediction Engine</p>
-                  <span id="badge-gnb-hw" class="rounded bg-surface-raised px-1.5 py-0.5 text-[9px] font-semibold uppercase text-ink-dim">Rules</span>
-                </div>
-                <p class="mt-1 text-[11px] text-ink-dim">Thresholds + Gaussian NB override</p>
-                <p class="mt-3 font-mono text-sm text-ink"><span id="sensor-gnb">collecting</span></p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ==================== MONITORING ==================== -->
-        <section id="page-monitoring" class="page">
-          <div class="page-header">
-            <div>
-              <p class="page-kicker">Live Monitoring</p>
-              <h2 class="page-title">Waveform & Trend Analysis</h2>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <select id="monitor-window" class="rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs text-ink-muted">
-                <option value="60">Last 1 min</option>
-                <option value="300" selected>Last 5 min</option>
-                <option value="900">Last 15 min</option>
-                <option value="3600">Last 1 hr</option>
-              </select>
-              <button class="rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition" onclick="refreshMonitoringCharts()">Refresh</button>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <div class="glass rounded-2xl p-4 shadow-glass">
-              <div class="mb-2 flex items-center justify-between">
-                <h3 class="text-sm font-medium text-ink">Current vs Time</h3>
-                <span class="text-[10px] font-mono text-ink-dim">A · zoom / pan enabled</span>
-              </div>
-              <div id="chart-current" class="chart-frame rounded-xl overflow-hidden"></div>
-            </div>
-            <div class="glass rounded-2xl p-4 shadow-glass">
-              <div class="mb-2 flex items-center justify-between">
-                <h3 class="text-sm font-medium text-ink">Temperature vs Time</h3>
-                <span class="text-[10px] font-mono text-ink-dim">°C · zoom / pan enabled</span>
-              </div>
-              <div id="chart-temp" class="chart-frame rounded-xl overflow-hidden"></div>
-            </div>
-            <div class="glass rounded-2xl p-4 shadow-glass">
-              <div class="mb-2 flex items-center justify-between">
-                <h3 class="text-sm font-medium text-ink">Power vs Time</h3>
-                <span class="text-[10px] font-mono text-ink-dim">kW · zoom / pan enabled</span>
-              </div>
-              <div id="chart-power" class="chart-frame rounded-xl overflow-hidden"></div>
-            </div>
-            <div class="glass rounded-2xl p-4 shadow-glass">
-              <div class="mb-2 flex items-center justify-between">
-                <h3 class="text-sm font-medium text-ink">Current Slope</h3>
-                <span class="text-[10px] font-mono text-ink-dim">A/s · derivative</span>
-              </div>
-              <div id="chart-cslope" class="chart-frame rounded-xl overflow-hidden"></div>
-            </div>
-            <div class="glass rounded-2xl p-4 shadow-glass xl:col-span-2">
-              <div class="mb-2 flex items-center justify-between">
-                <h3 class="text-sm font-medium text-ink">Temperature Slope</h3>
-                <span class="text-[10px] font-mono text-ink-dim">°C/s · heating rate</span>
-              </div>
-              <div id="chart-tslope" class="chart-frame-lg rounded-xl overflow-hidden"></div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ==================== HARDWARE NODE ==================== -->
-        <section id="page-regions" class="page">
-          <div class="page-header">
-            <div>
-              <p class="page-kicker">Hardware</p>
-              <h2 class="page-title">ESP32 Sensor Node</h2>
-            </div>
-            <p class="text-xs text-ink-dim max-w-xs text-right">Single local node — multi-region wiring is not on this board yet.</p>
-          </div>
-
-          <div id="regions-grid" class="card-grid">
-            <!-- populated by JS from live hardware -->
-          </div>
-
-          <div class="mt-4 glass rounded-2xl p-5 shadow-glass">
-            <h3 class="text-sm font-semibold text-ink mb-3">Pin map</h3>
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 text-sm">
-              <div class="rounded-xl border border-surface-border bg-surface-raised/50 px-4 py-3">
-                <p class="text-[10px] uppercase tracking-wider text-ink-dim">ACS712 current</p>
-                <p class="mt-1 font-mono text-ink">GPIO 34 (ADC1_CH6)</p>
-                <p class="mt-1 text-xs text-ink-dim">Sensitivity 185 mV/A · Vref 3.3 V · zero-cal at boot</p>
-              </div>
-              <div class="rounded-xl border border-surface-border bg-surface-raised/50 px-4 py-3">
-                <p class="text-[10px] uppercase tracking-wider text-ink-dim">DS18B20 temperature</p>
-                <p class="mt-1 font-mono text-ink">GPIO 4 (1-Wire)</p>
-                <p class="mt-1 text-xs text-ink-dim">12-bit · EMA smoothed · slope over 5 s window</p>
-              </div>
-              <div class="rounded-xl border border-surface-border bg-surface-raised/50 px-4 py-3">
-                <p class="text-[10px] uppercase tracking-wider text-ink-dim">Derived power</p>
-                <p class="mt-1 font-mono text-ink">P = 230 V × |I|</p>
-                <p class="mt-1 text-xs text-ink-dim">Single-phase estimate for UI / thresholds</p>
-              </div>
-              <div class="rounded-xl border border-surface-border bg-surface-raised/50 px-4 py-3">
-                <p class="text-[10px] uppercase tracking-wider text-ink-dim">Wi‑Fi SoftAP</p>
-                <p class="mt-1 font-mono text-ink">FireBeforeFire / firebefore123</p>
-                <p class="mt-1 text-xs text-ink-dim">Dashboard at http://192.168.4.1 · no internet required</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ==================== STATISTICS ==================== -->
-        <section id="page-statistics" class="page">
-          <div class="page-header">
-            <div>
-              <p class="page-kicker">Statistics</p>
-              <h2 class="page-title">Live Signal Analytics</h2>
-            </div>
-            <p class="text-xs text-ink-dim">From ACS712 / DS18B20 stream on this node</p>
-          </div>
-
-          <div class="stat-grid mb-5">
-            <div class="glass glass-hover rounded-xl p-4">
-              <p class="text-[10px] uppercase tracking-wider text-ink-dim">Mean Current</p>
-              <p class="mt-1 font-mono text-2xl font-semibold text-ink"><span id="stat-mean">—</span> <span class="text-xs text-ink-dim">A</span></p>
-            </div>
-            <div class="glass glass-hover rounded-xl p-4">
-              <p class="text-[10px] uppercase tracking-wider text-ink-dim">Median Current</p>
-              <p class="mt-1 font-mono text-2xl font-semibold text-ink"><span id="stat-median">—</span> <span class="text-xs text-ink-dim">A</span></p>
-            </div>
-            <div class="glass glass-hover rounded-xl p-4">
-              <p class="text-[10px] uppercase tracking-wider text-ink-dim">MA3 Current</p>
-              <p class="mt-1 font-mono text-2xl font-semibold text-ink"><span id="stat-ma3i">—</span> <span class="text-xs text-ink-dim">A</span></p>
-            </div>
-            <div class="glass glass-hover rounded-xl p-4">
-              <p class="text-[10px] uppercase tracking-wider text-ink-dim">Current Variance</p>
-              <p class="mt-1 font-mono text-2xl font-semibold text-ink"><span id="stat-vari">—</span></p>
-            </div>
-            <div class="glass glass-hover rounded-xl p-4">
-              <p class="text-[10px] uppercase tracking-wider text-ink-dim">Std Deviation</p>
-              <p class="mt-1 font-mono text-2xl font-semibold text-ink"><span id="stat-std">—</span></p>
-            </div>
-            <div class="glass glass-hover rounded-xl p-4">
-              <p class="text-[10px] uppercase tracking-wider text-ink-dim">Temp Slope</p>
-              <p class="mt-1 font-mono text-2xl font-semibold text-ink"><span id="stat-tslope">—</span> <span class="text-xs text-ink-dim">°C/s</span></p>
-            </div>
-            <div class="glass glass-hover rounded-xl p-4">
-              <p class="text-[10px] uppercase tracking-wider text-ink-dim">MA3 Temperature</p>
-              <p class="mt-1 font-mono text-2xl font-semibold text-ink"><span id="stat-ma3t">—</span> <span class="text-xs text-ink-dim">°C</span></p>
-            </div>
-            <div class="glass glass-hover rounded-xl p-4">
-              <p class="text-[10px] uppercase tracking-wider text-ink-dim">Live Samples</p>
-              <p class="mt-1 font-mono text-2xl font-semibold text-ink"><span id="stat-n">0</span></p>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <div class="glass rounded-2xl p-4 shadow-glass">
-              <h3 class="mb-2 text-sm font-medium text-ink">Current Distribution</h3>
-              <div id="chart-hist" class="chart-frame rounded-xl overflow-hidden"></div>
-            </div>
-            <div class="glass rounded-2xl p-4 shadow-glass">
-              <h3 class="mb-2 text-sm font-medium text-ink">Gaussian Fit (Current)</h3>
-              <div id="chart-gauss" class="chart-frame rounded-xl overflow-hidden"></div>
-            </div>
-            <div class="glass rounded-2xl p-4 shadow-glass xl:col-span-2">
-              <h3 class="mb-2 text-sm font-medium text-ink">Current &amp; Temperature Trend</h3>
-              <div id="chart-trend" class="chart-frame-lg rounded-xl overflow-hidden"></div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ==================== GAUSSIAN NB ==================== -->
-        <section id="page-bayesian" class="page">
-          <div class="page-header">
-            <div>
-              <p class="page-kicker">Gaussian Naive Bayes</p>
-              <h2 class="page-title">On-device Probabilistic Prediction</h2>
-            </div>
-            <div class="text-right text-xs text-ink-dim">
-              <div id="bayes-pipeline-status">Collecting labeled dataset…</div>
-              <div class="font-mono mt-0.5">Source: <span id="bayes-source">rules</span></div>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 mb-5">
-            <div class="glass glass-hover rounded-2xl p-5 shadow-glass">
-              <p class="text-[11px] uppercase tracking-wider text-ink-dim">P(OK)</p>
-              <p id="bayes-p-ok" class="mt-2 font-mono text-4xl font-semibold text-success-muted">—</p>
-              <div class="mt-3 h-1.5 rounded-full bg-surface-raised overflow-hidden">
-                <div id="bayes-bar-ok" class="h-full rounded-full bg-success" style="width:0%"></div>
-              </div>
-            </div>
-            <div class="glass glass-hover rounded-2xl p-5 shadow-glass">
-              <p class="text-[11px] uppercase tracking-wider text-ink-dim">P(Warn) + P(Critical)</p>
-              <p id="bayes-p-hazard" class="mt-2 font-mono text-4xl font-semibold text-danger-muted">—</p>
-              <div class="mt-3 h-1.5 rounded-full bg-surface-raised overflow-hidden">
-                <div id="bayes-bar-hazard" class="h-full rounded-full bg-danger" style="width:0%"></div>
-              </div>
-            </div>
-            <div class="glass rounded-2xl p-5 shadow-glass flex flex-col items-center justify-center">
-              <p class="text-[11px] uppercase tracking-wider text-ink-dim mb-3">NB Confidence</p>
-              <div id="bayes-gauge" class="relative h-28 w-28 rounded-full gauge-ring p-2" style="--pct: 0%">
-                <div class="flex h-full w-full items-center justify-center rounded-full bg-surface-card">
-                  <span id="bayes-conf" class="font-mono text-2xl font-semibold text-accent-muted">—</span>
+                <div
+                  class="flex flex-wrap items-center gap-2 text-xs text-ink-dim"
+                >
+                  <span
+                    id="live-status-dot"
+                    class="status-dot status-ok animate-pulseLive"
+                  ></span>
+                  <span
+                    >Live · Updated
+                    <span id="last-update" class="font-mono text-ink-muted"
+                      >just now</span
+                    ></span
+                  >
+                  <span
+                    id="mode-badge"
+                    class="rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-muted"
+                    >manual</span
+                  >
+                  <span
+                    id="gnb-badge"
+                    class="rounded-md bg-surface-raised px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-dim"
+                    title="Gaussian NB pipeline"
+                    >gnb: collecting</span
+                  >
                 </div>
               </div>
-            </div>
-          </div>
 
-          <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 mb-5">
-            <div class="glass rounded-xl p-4">
-              <p class="text-[10px] uppercase text-ink-dim">Class Posteriors</p>
-              <p id="bayes-posteriors" class="mt-1 font-mono text-sm text-ink leading-relaxed">ok — · warn — · crit —</p>
-              <div class="equation mt-3 rounded-lg px-3 py-2 text-xs text-accent-muted">softmax(log prior + Σ log N(x|μ,σ))</div>
-            </div>
-            <div class="glass rounded-xl p-4">
-              <p class="text-[10px] uppercase text-ink-dim">Dataset / Fit</p>
-              <p id="bayes-train" class="mt-1 font-mono text-xl text-ink">n = 0</p>
-              <div id="bayes-counts" class="equation mt-3 rounded-lg px-3 py-2 text-xs text-accent-muted">counts [0,0,0]</div>
-            </div>
-            <div class="glass rounded-xl p-4">
-              <p class="text-[10px] uppercase text-ink-dim">Sufficiency</p>
-              <p id="bayes-score" class="mt-1 font-mono text-xl text-ink">0 / 10</p>
-              <div class="equation mt-3 rounded-lg px-3 py-2 text-xs text-accent-muted">ready when score ≥ 6</div>
-            </div>
-            <div id="bayes-decision-card" class="glass rounded-xl p-4 border border-surface-border">
-              <p class="text-[10px] uppercase text-ink-dim">Decision</p>
-              <p id="bayes-decision" class="mt-1 text-xl font-semibold text-ink-muted">Standby</p>
-              <div id="bayes-decision-eq" class="equation mt-3 rounded-lg px-3 py-2 text-xs text-ink-dim">rules active until NB confident</div>
-            </div>
-          </div>
+              <!-- Live prediction warnings -->
+              <div id="prediction-warnings" class="mb-4 hidden space-y-2"></div>
 
-          <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <div class="glass rounded-2xl p-5 shadow-glass">
-              <h3 class="text-sm font-medium text-ink mb-3">How this node decides</h3>
-              <div class="equation rounded-xl px-4 py-4 text-sm leading-relaxed text-ink-muted space-y-2">
-                <p>1. Rule engine scores ACS712 + DS18B20 features vs thresholds.</p>
-                <p>2. When the labeled dataset is statistically sufficient, Gaussian NB is fitted on-device.</p>
-                <p>3. If NB confidence ≥ 60% and ≥ rule confidence, NB overrides the warning banner.</p>
-              </div>
-              <p class="mt-3 text-xs text-ink-dim">Features for NB exclude powerW (derived as 230×|I|). Labels come from threshold + temperature checks on each batch average.</p>
-            </div>
-            <div class="glass rounded-2xl p-4 shadow-glass">
-              <h3 class="mb-2 text-sm font-medium text-ink">Hazard Posterior Over Time</h3>
-              <div id="chart-bayes" class="chart-frame rounded-xl overflow-hidden"></div>
-            </div>
-          </div>
-        </section>
+              <!-- Parameter threshold status strip -->
+              <div id="param-status-grid" class="param-grid"></div>
 
-        <!-- ==================== ALERTS ==================== -->
-        <section id="page-alerts" class="page">
-          <div class="page-header">
-            <div>
-              <p class="page-kicker">Alerts</p>
-              <h2 class="page-title">Incident Timeline</h2>
-            </div>
-            <div class="flex flex-wrap gap-2 text-xs">
-              <button class="alert-filter active rounded-lg border border-accent/40 bg-accent-soft px-3 py-1.5 text-accent-muted" data-filter="all">All</button>
-              <button class="alert-filter rounded-lg border border-surface-border px-3 py-1.5 text-ink-muted hover:bg-surface-hover" data-filter="current">Current</button>
-              <button class="alert-filter rounded-lg border border-surface-border px-3 py-1.5 text-ink-muted hover:bg-surface-hover" data-filter="past">Past</button>
-            </div>
-          </div>
-
-          <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div class="glass rounded-xl p-3 border-l-2 border-success">
-              <p class="text-[10px] text-ink-dim">Info / Green</p>
-              <p id="alert-count-info" class="font-mono text-xl text-success-muted">0</p>
-            </div>
-            <div class="glass rounded-xl p-3 border-l-2 border-yellow-400">
-              <p class="text-[10px] text-ink-dim">Yellow</p>
-              <p id="alert-count-yellow" class="font-mono text-xl text-yellow-400">0</p>
-            </div>
-            <div class="glass rounded-xl p-3 border-l-2 border-warning">
-              <p class="text-[10px] text-ink-dim">Orange / Warn</p>
-              <p id="alert-count-orange" class="font-mono text-xl text-warning-muted">0</p>
-            </div>
-            <div class="glass rounded-xl p-3 border-l-2 border-danger">
-              <p class="text-[10px] text-ink-dim">Red / Critical</p>
-              <p id="alert-count-red" class="font-mono text-xl text-danger-muted">0</p>
-            </div>
-          </div>
-
-          <div id="alerts-timeline" class="relative space-y-0 pl-4 border-l border-surface-border ml-2">
-            <!-- populated by JS -->
-          </div>
-        </section>
-
-        <!-- ==================== EVENT HISTORY ==================== -->
-        <section id="page-history" class="page">
-          <div class="page-header">
-            <div>
-              <p class="page-kicker">Event History</p>
-              <h2 class="page-title">Logged Events</h2>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <button class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition">Export CSV</button>
-              <button class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition">Export JSON</button>
-              <button class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition">Export PDF</button>
-            </div>
-          </div>
-
-          <div class="glass rounded-2xl shadow-glass overflow-hidden">
-            <div class="flex flex-wrap gap-3 border-b border-surface-border p-4">
-              <div class="relative flex-1 min-w-[180px]">
-                <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                <input id="history-search" type="search" placeholder="Search events…" class="w-full rounded-lg border border-surface-border bg-surface-raised py-2 pl-9 pr-3 text-sm text-ink placeholder:text-ink-dim" />
-              </div>
-              <select id="history-severity" class="rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm text-ink-muted">
-                <option value="all">All Severities</option>
-                <option value="info">Info</option>
-                <option value="warning">Warning</option>
-                <option value="critical">Critical</option>
-              </select>
-              <select id="history-region" class="rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm text-ink-muted">
-                <option value="all">All Regions</option>
-                <option value="ESP32 Local Node">ESP32 Local Node</option>
-              </select>
-              <select id="history-sort" class="rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm text-ink-muted">
-                <option value="newest">Newest First</option>
-                <option value="oldest">Oldest First</option>
-                <option value="severity">Severity</option>
-              </select>
-            </div>
-
-            <div class="table-wrap max-h-[520px] border-0 rounded-none border-t border-surface-border">
-              <table class="data-table w-full text-left text-sm">
-                <thead>
-                  <tr class="text-[11px] uppercase tracking-wider text-ink-dim border-b border-surface-border">
-                    <th class="px-4 py-3 font-medium">Timestamp</th>
-                    <th class="px-4 py-3 font-medium">Event</th>
-                    <th class="px-4 py-3 font-medium">Region</th>
-                    <th class="px-4 py-3 font-medium">Sensor</th>
-                    <th class="px-4 py-3 font-medium">Severity</th>
-                    <th class="px-4 py-3 font-medium">Value</th>
-                  </tr>
-                </thead>
-                <tbody id="history-tbody" class="divide-y divide-surface-border text-ink-muted">
-                  <!-- populated by JS -->
-                </tbody>
-              </table>
-            </div>
-            <div class="flex items-center justify-between border-t border-surface-border px-4 py-3 text-xs text-ink-dim">
-              <span id="history-count">Showing 0 events</span>
-              <div class="flex gap-2">
-                <button class="rounded border border-surface-border px-2 py-1 hover:bg-surface-hover">Prev</button>
-                <button class="rounded border border-surface-border px-2 py-1 hover:bg-surface-hover">Next</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ==================== SETTINGS ==================== -->
-        <section id="page-settings" class="page">
-          <div class="page-header">
-            <div>
-              <p class="page-kicker">Settings</p>
-              <h2 class="page-title">System Configuration</h2>
-            </div>
-          </div>
-
-          <!-- Fire prediction thresholds -->
-          <div class="glass rounded-2xl p-5 shadow-glass mb-4">
-            <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
-              <div>
-                <h3 class="text-sm font-semibold text-ink flex items-center gap-2">
-                  <span class="h-1.5 w-1.5 rounded-full bg-danger"></span> Fire Prediction Parameters
-                </h3>
-                <p class="mt-1 text-xs text-ink-dim">Weighted by importance · warn / critical thresholds · adaptive or manual</p>
-              </div>
-              <div class="flex flex-wrap items-center gap-3">
-                <label class="flex items-center gap-2 text-xs text-ink-muted cursor-pointer">
-                  <span>Manual</span>
-                  <div id="adaptive-toggle" class="toggle-track" role="switch" aria-checked="false">
-                    <div class="toggle-thumb"></div>
+              <div class="kpi-grid">
+                <!-- Current -->
+                <article
+                  class="glass glass-hover kpi-card shadow-glass"
+                  data-param="current"
+                >
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <p
+                        class="text-[11px] font-medium uppercase tracking-wider text-ink-dim"
+                      >
+                        Current
+                      </p>
+                      <p
+                        class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"
+                      >
+                        <span id="kpi-current">0.00</span
+                        ><span class="ml-1 text-sm font-normal text-ink-dim"
+                          >A</span
+                        >
+                      </p>
+                    </div>
+                    <span
+                      id="dot-current"
+                      class="status-dot status-idle mt-1"
+                    ></span>
                   </div>
-                  <span>Adaptive</span>
-                </label>
+                  <div id="spark-current" class="mini-spark mt-3"></div>
+                  <div class="kpi-foot">
+                    <span id="lbl-current" class="text-ink-dim">waiting…</span>
+                    <span id="sub-current" class="font-mono text-ink-dim"
+                      >Δ — A/s</span
+                    >
+                  </div>
+                </article>
+
+                <!-- Temperature -->
+                <article
+                  class="glass glass-hover kpi-card shadow-glass"
+                  data-param="temp"
+                >
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <p
+                        class="text-[11px] font-medium uppercase tracking-wider text-ink-dim"
+                      >
+                        Temperature
+                      </p>
+                      <p
+                        class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"
+                      >
+                        <span id="kpi-temp">0.0</span
+                        ><span class="ml-1 text-sm font-normal text-ink-dim"
+                          >°C</span
+                        >
+                      </p>
+                    </div>
+                    <span
+                      id="dot-temp"
+                      class="status-dot status-idle mt-1"
+                    ></span>
+                  </div>
+                  <div id="spark-temp" class="mini-spark mt-3"></div>
+                  <div class="kpi-foot">
+                    <span id="lbl-temp" class="text-ink-dim">waiting…</span>
+                    <span id="sub-temp" class="font-mono text-ink-dim"
+                      >Δ — °C/s</span
+                    >
+                  </div>
+                </article>
+
+                <!-- Power -->
+                <article
+                  class="glass glass-hover kpi-card shadow-glass"
+                  data-param="power"
+                >
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <p
+                        class="text-[11px] font-medium uppercase tracking-wider text-ink-dim"
+                      >
+                        Power
+                      </p>
+                      <p
+                        class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"
+                      >
+                        <span id="kpi-power">0.00</span
+                        ><span class="ml-1 text-sm font-normal text-ink-dim"
+                          >kW</span
+                        >
+                      </p>
+                    </div>
+                    <span
+                      id="dot-power"
+                      class="status-dot status-idle mt-1"
+                    ></span>
+                  </div>
+                  <div id="spark-power" class="mini-spark mt-3"></div>
+                  <div class="kpi-foot">
+                    <span id="lbl-power" class="text-ink-dim">waiting…</span>
+                    <span class="font-mono text-ink-dim">230 V · 1φ</span>
+                  </div>
+                </article>
+
+                <!-- Current Slope -->
+                <article
+                  class="glass glass-hover kpi-card shadow-glass"
+                  data-param="currentSlope"
+                >
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <p
+                        class="text-[11px] font-medium uppercase tracking-wider text-ink-dim"
+                      >
+                        Current Slope
+                      </p>
+                      <p
+                        class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"
+                      >
+                        <span id="kpi-cslope">0.000</span
+                        ><span class="ml-1 text-sm font-normal text-ink-dim"
+                          >A/s</span
+                        >
+                      </p>
+                    </div>
+                    <span
+                      id="dot-cslope"
+                      class="status-dot status-idle mt-1"
+                    ></span>
+                  </div>
+                  <div id="spark-cslope" class="mini-spark mt-3"></div>
+                  <div class="kpi-foot">
+                    <span id="lbl-cslope" class="text-ink-dim">waiting…</span>
+                    <span id="sub-cslope" class="font-mono text-ink-dim"
+                      >thresh —</span
+                    >
+                  </div>
+                </article>
+
+                <!-- Temperature Slope -->
+                <article
+                  class="glass glass-hover kpi-card shadow-glass"
+                  data-param="tempSlope"
+                >
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <p
+                        class="text-[11px] font-medium uppercase tracking-wider text-ink-dim"
+                      >
+                        Temperature Slope
+                      </p>
+                      <p
+                        class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"
+                      >
+                        <span id="kpi-tslope">0.000</span
+                        ><span class="ml-1 text-sm font-normal text-ink-dim"
+                          >°C/s</span
+                        >
+                      </p>
+                    </div>
+                    <span
+                      id="dot-tslope"
+                      class="status-dot status-idle mt-1"
+                    ></span>
+                  </div>
+                  <div id="spark-tslope" class="mini-spark mt-3"></div>
+                  <div class="kpi-foot">
+                    <span id="lbl-tslope" class="text-ink-dim">waiting…</span>
+                    <span id="sub-tslope" class="font-mono text-ink-dim"
+                      >thresh —</span
+                    >
+                  </div>
+                </article>
+
+                <!-- Risk Level -->
+                <article class="glass glass-hover kpi-card shadow-glass">
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <p
+                        class="text-[11px] font-medium uppercase tracking-wider text-ink-dim"
+                      >
+                        Risk Level
+                      </p>
+                      <p
+                        class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-ink"
+                      >
+                        <span id="kpi-risk">0</span
+                        ><span class="ml-1 text-sm font-normal text-ink-dim"
+                          >%</span
+                        >
+                      </p>
+                    </div>
+                    <span
+                      id="kpi-risk-badge"
+                      class="rounded-md bg-surface-raised px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-dim"
+                      >—</span
+                    >
+                  </div>
+                  <div
+                    class="mt-4 h-2 overflow-hidden rounded-full bg-surface-raised"
+                  >
+                    <div
+                      id="kpi-risk-bar"
+                      class="h-full rounded-full bg-gradient-to-r from-success via-warning to-danger"
+                      style="width: 0%"
+                    ></div>
+                  </div>
+                  <div
+                    class="mt-2 flex justify-between text-[10px] font-mono text-ink-dim"
+                  >
+                    <span>LOW</span><span>MOD</span><span>HIGH</span
+                    ><span>CRIT</span>
+                  </div>
+                </article>
+
+                <!-- Confidence -->
+                <article class="glass glass-hover kpi-card shadow-glass">
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <p
+                        class="text-[11px] font-medium uppercase tracking-wider text-ink-dim"
+                      >
+                        Confidence
+                      </p>
+                      <p
+                        class="kpi-value mt-1 font-mono text-3xl font-semibold tabular-nums text-accent-muted"
+                      >
+                        <span id="kpi-conf">0</span
+                        ><span class="ml-1 text-sm font-normal text-ink-dim"
+                          >%</span
+                        >
+                      </p>
+                    </div>
+                    <span
+                      id="dot-conf"
+                      class="status-dot status-idle mt-1"
+                    ></span>
+                  </div>
+                  <div id="spark-conf" class="mini-spark mt-3"></div>
+                  <div class="kpi-foot">
+                    <span id="lbl-conf" class="text-accent-muted"
+                      >collecting…</span
+                    >
+                    <span id="sub-conf" class="font-mono text-ink-dim"
+                      >n = 0</span
+                    >
+                  </div>
+                </article>
+
+                <!-- Operating Phase -->
+                <article class="glass glass-hover kpi-card shadow-glass">
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <p
+                        class="text-[11px] font-medium uppercase tracking-wider text-ink-dim"
+                      >
+                        Operating Phase
+                      </p>
+                      <p
+                        id="kpi-phase"
+                        class="mt-1 text-2xl font-semibold text-ink"
+                      >
+                        —
+                      </p>
+                    </div>
+                    <span
+                      id="dot-phase"
+                      class="status-dot status-idle mt-1"
+                    ></span>
+                  </div>
+                  <div class="mt-4 flex gap-1.5">
+                    <div id="phase-idle" class="phase-chip">
+                      <div class="label">Idle</div>
+                    </div>
+                    <div id="phase-steady" class="phase-chip">
+                      <div class="label">Steady</div>
+                    </div>
+                    <div id="phase-transient" class="phase-chip">
+                      <div class="label">Transient</div>
+                    </div>
+                    <div id="phase-fault" class="phase-chip">
+                      <div class="label">Fault</div>
+                    </div>
+                  </div>
+                  <div
+                    id="phase-meta"
+                    class="mt-2 text-[11px] text-ink-dim leading-snug"
+                  >
+                    ESP32 · ACS712 GPIO34 · DS18B20 GPIO4
+                  </div>
+                </article>
               </div>
-            </div>
 
-            <div class="table-wrap">
-              <table class="w-full text-left text-sm">
-                <thead class="bg-surface-raised text-[11px] uppercase tracking-wider text-ink-dim">
-                  <tr>
-                    <th class="px-3 py-2.5 font-medium">Parameter</th>
-                    <th class="px-3 py-2.5 font-medium">Source</th>
-                    <th class="px-3 py-2.5 font-medium">Importance</th>
-                    <th class="px-3 py-2.5 font-medium">Warn</th>
-                    <th class="px-3 py-2.5 font-medium">Critical</th>
-                    <th class="px-3 py-2.5 font-medium">Live</th>
-                  </tr>
-                </thead>
-                <tbody id="threshold-editor-body" class="divide-y divide-surface-border">
-                  <!-- filled by JS -->
-                </tbody>
-              </table>
-            </div>
+              <!-- Hardware sensors + derived pipeline -->
+              <div class="mt-6">
+                <div
+                  class="mb-3 flex flex-wrap items-center justify-between gap-2"
+                >
+                  <h3 class="text-sm font-semibold text-ink">
+                    Connected Hardware
+                  </h3>
+                  <span class="text-[11px] text-ink-dim">Live ESP32 node</span>
+                </div>
+                <div class="sensor-grid">
+                  <div
+                    class="glass sensor-card rounded-xl p-4 border-l-2 border-success"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-xs font-medium text-ink">Current Sensor</p>
+                      <span
+                        id="badge-acs712"
+                        class="rounded bg-success-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success-muted"
+                        >Active</span
+                      >
+                    </div>
+                    <p class="mt-1 text-[11px] text-ink-dim">
+                      ACS712 · ADC GPIO 34 · 185 mV/A
+                    </p>
+                    <p class="mt-3 font-mono text-lg text-ink">
+                      <span id="sensor-current">—</span> A
+                    </p>
+                  </div>
+                  <div
+                    class="glass sensor-card rounded-xl p-4 border-l-2 border-success"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-xs font-medium text-ink">
+                        Temperature Sensor
+                      </p>
+                      <span
+                        id="badge-ds18b20"
+                        class="rounded bg-success-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success-muted"
+                        >Active</span
+                      >
+                    </div>
+                    <p class="mt-1 text-[11px] text-ink-dim">
+                      DS18B20 · 1-Wire GPIO 4 · 12-bit
+                    </p>
+                    <p class="mt-3 font-mono text-lg text-ink">
+                      <span id="sensor-temp">—</span> °C
+                    </p>
+                  </div>
+                  <div
+                    class="glass sensor-card rounded-xl p-4 border-l-2 border-accent"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-xs font-medium text-ink">Controller</p>
+                      <span
+                        class="rounded bg-accent-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-accent-muted"
+                        >ESP32</span
+                      >
+                    </div>
+                    <p class="mt-1 text-[11px] text-ink-dim">
+                      SoftAP FireBeforeFire · 192.168.4.1
+                    </p>
+                    <p class="mt-3 font-mono text-sm text-ink-muted">
+                      Batch <span id="sensor-batch">0/60</span>
+                    </p>
+                  </div>
+                  <div
+                    class="glass sensor-card rounded-xl p-4 border-l-2 border-warning"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-xs font-medium text-ink">
+                        Prediction Engine
+                      </p>
+                      <span
+                        id="badge-gnb-hw"
+                        class="rounded bg-surface-raised px-1.5 py-0.5 text-[9px] font-semibold uppercase text-ink-dim"
+                        >Rules</span
+                      >
+                    </div>
+                    <p class="mt-1 text-[11px] text-ink-dim">
+                      Thresholds + Gaussian NB override
+                    </p>
+                    <p class="mt-3 font-mono text-sm text-ink">
+                      <span id="sensor-gnb">collecting</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-            <div class="mt-4 flex flex-wrap justify-end gap-2">
-              <button id="btn-reset-defaults" class="rounded-lg border border-surface-border px-4 py-2 text-sm text-ink-muted hover:bg-surface-hover transition">Reset Defaults</button>
-              <button id="btn-apply-adaptive" class="rounded-lg border border-accent/40 bg-accent-soft px-4 py-2 text-sm text-accent-muted hover:bg-accent/20 transition">Apply Adaptive</button>
-              <button id="btn-save-thresholds" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-muted transition shadow-glow">Save Manual Thresholds</button>
-            </div>
-          </div>
+            <!-- ==================== MONITORING ==================== -->
+            <section id="page-monitoring" class="page">
+              <div class="page-header">
+                <div>
+                  <p class="page-kicker">Live Monitoring</p>
+                  <h2 class="page-title">Waveform & Trend Analysis</h2>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <select
+                    id="monitor-window"
+                    class="rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs text-ink-muted"
+                  >
+                    <option value="60">Last 1 min</option>
+                    <option value="300" selected>Last 5 min</option>
+                    <option value="900">Last 15 min</option>
+                    <option value="3600">Last 1 hr</option>
+                  </select>
+                  <button
+                    class="rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
+                    onclick="refreshMonitoringCharts()"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
 
-          <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <!-- Hardware -->
-            <div class="glass rounded-2xl p-5 shadow-glass">
-              <h3 class="text-sm font-semibold text-ink mb-4 flex items-center gap-2">
-                <span class="h-1.5 w-1.5 rounded-full bg-accent"></span> This Node
-              </h3>
-              <div class="space-y-3 text-sm">
-                <div class="flex justify-between gap-3 border-b border-surface-border pb-2">
-                  <span class="text-ink-dim">Board</span>
-                  <span class="font-mono text-ink">ESP32 Dev Module</span>
+              <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <div class="glass rounded-2xl p-4 shadow-glass">
+                  <div class="mb-2 flex items-center justify-between">
+                    <h3 class="text-sm font-medium text-ink">
+                      Current vs Time
+                    </h3>
+                    <span class="text-[10px] font-mono text-ink-dim"
+                      >A · zoom / pan enabled</span
+                    >
+                  </div>
+                  <div
+                    id="chart-current"
+                    class="chart-frame rounded-xl overflow-hidden"
+                  ></div>
                 </div>
-                <div class="flex justify-between gap-3 border-b border-surface-border pb-2">
-                  <span class="text-ink-dim">Current</span>
-                  <span class="font-mono text-ink">ACS712 · GPIO 34</span>
+                <div class="glass rounded-2xl p-4 shadow-glass">
+                  <div class="mb-2 flex items-center justify-between">
+                    <h3 class="text-sm font-medium text-ink">
+                      Temperature vs Time
+                    </h3>
+                    <span class="text-[10px] font-mono text-ink-dim"
+                      >°C · zoom / pan enabled</span
+                    >
+                  </div>
+                  <div
+                    id="chart-temp"
+                    class="chart-frame rounded-xl overflow-hidden"
+                  ></div>
                 </div>
-                <div class="flex justify-between gap-3 border-b border-surface-border pb-2">
-                  <span class="text-ink-dim">Temperature</span>
-                  <span class="font-mono text-ink">DS18B20 · GPIO 4</span>
+                <div class="glass rounded-2xl p-4 shadow-glass">
+                  <div class="mb-2 flex items-center justify-between">
+                    <h3 class="text-sm font-medium text-ink">Power vs Time</h3>
+                    <span class="text-[10px] font-mono text-ink-dim"
+                      >kW · zoom / pan enabled</span
+                    >
+                  </div>
+                  <div
+                    id="chart-power"
+                    class="chart-frame rounded-xl overflow-hidden"
+                  ></div>
                 </div>
-                <div class="flex justify-between gap-3 border-b border-surface-border pb-2">
-                  <span class="text-ink-dim">SoftAP</span>
-                  <span class="font-mono text-ink">FireBeforeFire</span>
+                <div class="glass rounded-2xl p-4 shadow-glass">
+                  <div class="mb-2 flex items-center justify-between">
+                    <h3 class="text-sm font-medium text-ink">Current Slope</h3>
+                    <span class="text-[10px] font-mono text-ink-dim"
+                      >A/s · derivative</span
+                    >
+                  </div>
+                  <div
+                    id="chart-cslope"
+                    class="chart-frame rounded-xl overflow-hidden"
+                  ></div>
                 </div>
-                <div class="flex justify-between gap-3">
-                  <span class="text-ink-dim">Dashboard</span>
-                  <span class="font-mono text-ink">192.168.4.1</span>
+                <div class="glass rounded-2xl p-4 shadow-glass xl:col-span-2">
+                  <div class="mb-2 flex items-center justify-between">
+                    <h3 class="text-sm font-medium text-ink">
+                      Temperature Slope
+                    </h3>
+                    <span class="text-[10px] font-mono text-ink-dim"
+                      >°C/s · heating rate</span
+                    >
+                  </div>
+                  <div
+                    id="chart-tslope"
+                    class="chart-frame-lg rounded-xl overflow-hidden"
+                  ></div>
                 </div>
-                <div class="flex items-center justify-between pt-2">
+              </div>
+            </section>
+
+            <!-- ==================== HARDWARE NODE ==================== -->
+            <section id="page-regions" class="page">
+              <div class="page-header">
+                <div>
+                  <p class="page-kicker">Hardware</p>
+                  <h2 class="page-title">ESP32 Sensor Node</h2>
+                </div>
+                <p class="text-xs text-ink-dim max-w-xs text-right">
+                  Single local node — multi-region wiring is not on this board
+                  yet.
+                </p>
+              </div>
+
+              <div id="regions-grid" class="card-grid">
+                <!-- populated by JS from live hardware -->
+              </div>
+
+              <div class="mt-4 glass rounded-2xl p-5 shadow-glass">
+                <h3 class="text-sm font-semibold text-ink mb-3">Pin map</h3>
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 text-sm">
+                  <div
+                    class="rounded-xl border border-surface-border bg-surface-raised/50 px-4 py-3"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider text-ink-dim"
+                    >
+                      ACS712 current
+                    </p>
+                    <p class="mt-1 font-mono text-ink">GPIO 34 (ADC1_CH6)</p>
+                    <p class="mt-1 text-xs text-ink-dim">
+                      Sensitivity 185 mV/A · Vref 3.3 V · zero-cal at boot
+                    </p>
+                  </div>
+                  <div
+                    class="rounded-xl border border-surface-border bg-surface-raised/50 px-4 py-3"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider text-ink-dim"
+                    >
+                      DS18B20 temperature
+                    </p>
+                    <p class="mt-1 font-mono text-ink">GPIO 4 (1-Wire)</p>
+                    <p class="mt-1 text-xs text-ink-dim">
+                      12-bit · EMA smoothed · slope over 5 s window
+                    </p>
+                  </div>
+                  <div
+                    class="rounded-xl border border-surface-border bg-surface-raised/50 px-4 py-3"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider text-ink-dim"
+                    >
+                      Derived power
+                    </p>
+                    <p class="mt-1 font-mono text-ink">P = 230 V × |I|</p>
+                    <p class="mt-1 text-xs text-ink-dim">
+                      Single-phase estimate for UI / thresholds
+                    </p>
+                  </div>
+                  <div
+                    class="rounded-xl border border-surface-border bg-surface-raised/50 px-4 py-3"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider text-ink-dim"
+                    >
+                      Wi‑Fi SoftAP
+                    </p>
+                    <p class="mt-1 font-mono text-ink">
+                      FireBeforeFire / firebefore123
+                    </p>
+                    <p class="mt-1 text-xs text-ink-dim">
+                      Dashboard at http://192.168.4.1 · no internet required
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ==================== STATISTICS ==================== -->
+            <section id="page-statistics" class="page">
+              <div class="page-header">
+                <div>
+                  <p class="page-kicker">Statistics</p>
+                  <h2 class="page-title">Live Signal Analytics</h2>
+                </div>
+                <p class="text-xs text-ink-dim">
+                  From ACS712 / DS18B20 stream on this node
+                </p>
+              </div>
+
+              <div class="stat-grid mb-5">
+                <div class="glass glass-hover rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    Mean Current
+                  </p>
+                  <p class="mt-1 font-mono text-2xl font-semibold text-ink">
+                    <span id="stat-mean">—</span>
+                    <span class="text-xs text-ink-dim">A</span>
+                  </p>
+                </div>
+                <div class="glass glass-hover rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    Median Current
+                  </p>
+                  <p class="mt-1 font-mono text-2xl font-semibold text-ink">
+                    <span id="stat-median">—</span>
+                    <span class="text-xs text-ink-dim">A</span>
+                  </p>
+                </div>
+                <div class="glass glass-hover rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    MA3 Current
+                  </p>
+                  <p class="mt-1 font-mono text-2xl font-semibold text-ink">
+                    <span id="stat-ma3i">—</span>
+                    <span class="text-xs text-ink-dim">A</span>
+                  </p>
+                </div>
+                <div class="glass glass-hover rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    Current Variance
+                  </p>
+                  <p class="mt-1 font-mono text-2xl font-semibold text-ink">
+                    <span id="stat-vari">—</span>
+                  </p>
+                </div>
+                <div class="glass glass-hover rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    Std Deviation
+                  </p>
+                  <p class="mt-1 font-mono text-2xl font-semibold text-ink">
+                    <span id="stat-std">—</span>
+                  </p>
+                </div>
+                <div class="glass glass-hover rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    Temp Slope
+                  </p>
+                  <p class="mt-1 font-mono text-2xl font-semibold text-ink">
+                    <span id="stat-tslope">—</span>
+                    <span class="text-xs text-ink-dim">°C/s</span>
+                  </p>
+                </div>
+                <div class="glass glass-hover rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    MA3 Temperature
+                  </p>
+                  <p class="mt-1 font-mono text-2xl font-semibold text-ink">
+                    <span id="stat-ma3t">—</span>
+                    <span class="text-xs text-ink-dim">°C</span>
+                  </p>
+                </div>
+                <div class="glass glass-hover rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    Live Samples
+                  </p>
+                  <p class="mt-1 font-mono text-2xl font-semibold text-ink">
+                    <span id="stat-n">0</span>
+                  </p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <div class="glass rounded-2xl p-4 shadow-glass">
+                  <h3 class="mb-2 text-sm font-medium text-ink">
+                    Current Distribution
+                  </h3>
+                  <div
+                    id="chart-hist"
+                    class="chart-frame rounded-xl overflow-hidden"
+                  ></div>
+                </div>
+                <div class="glass rounded-2xl p-4 shadow-glass">
+                  <h3 class="mb-2 text-sm font-medium text-ink">
+                    Gaussian Fit (Current)
+                  </h3>
+                  <div
+                    id="chart-gauss"
+                    class="chart-frame rounded-xl overflow-hidden"
+                  ></div>
+                </div>
+                <div class="glass rounded-2xl p-4 shadow-glass xl:col-span-2">
+                  <h3 class="mb-2 text-sm font-medium text-ink">
+                    Current &amp; Temperature Trend
+                  </h3>
+                  <div
+                    id="chart-trend"
+                    class="chart-frame-lg rounded-xl overflow-hidden"
+                  ></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ==================== GAUSSIAN NB ==================== -->
+            <section id="page-bayesian" class="page">
+              <div class="page-header">
+                <div>
+                  <p class="page-kicker">Gaussian Naive Bayes</p>
+                  <h2 class="page-title">On-device Probabilistic Prediction</h2>
+                </div>
+                <div class="text-right text-xs text-ink-dim">
+                  <div id="bayes-pipeline-status">
+                    Collecting labeled dataset…
+                  </div>
+                  <div class="font-mono mt-0.5">
+                    Source: <span id="bayes-source">rules</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 mb-5">
+                <div class="glass glass-hover rounded-2xl p-5 shadow-glass">
+                  <p class="text-[11px] uppercase tracking-wider text-ink-dim">
+                    P(OK)
+                  </p>
+                  <p
+                    id="bayes-p-ok"
+                    class="mt-2 font-mono text-4xl font-semibold text-success-muted"
+                  >
+                    —
+                  </p>
+                  <div
+                    class="mt-3 h-1.5 rounded-full bg-surface-raised overflow-hidden"
+                  >
+                    <div
+                      id="bayes-bar-ok"
+                      class="h-full rounded-full bg-success"
+                      style="width: 0%"
+                    ></div>
+                  </div>
+                </div>
+                <div class="glass glass-hover rounded-2xl p-5 shadow-glass">
+                  <p class="text-[11px] uppercase tracking-wider text-ink-dim">
+                    P(Warn) + P(Critical)
+                  </p>
+                  <p
+                    id="bayes-p-hazard"
+                    class="mt-2 font-mono text-4xl font-semibold text-danger-muted"
+                  >
+                    —
+                  </p>
+                  <div
+                    class="mt-3 h-1.5 rounded-full bg-surface-raised overflow-hidden"
+                  >
+                    <div
+                      id="bayes-bar-hazard"
+                      class="h-full rounded-full bg-danger"
+                      style="width: 0%"
+                    ></div>
+                  </div>
+                </div>
+                <div
+                  class="glass rounded-2xl p-5 shadow-glass flex flex-col items-center justify-center"
+                >
+                  <p
+                    class="text-[11px] uppercase tracking-wider text-ink-dim mb-3"
+                  >
+                    NB Confidence
+                  </p>
+                  <div
+                    id="bayes-gauge"
+                    class="relative h-28 w-28 rounded-full gauge-ring p-2"
+                    style="--pct: 0%"
+                  >
+                    <div
+                      class="flex h-full w-full items-center justify-center rounded-full bg-surface-card"
+                    >
+                      <span
+                        id="bayes-conf"
+                        class="font-mono text-2xl font-semibold text-accent-muted"
+                        >—</span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 mb-5"
+              >
+                <div class="glass rounded-xl p-4">
+                  <p class="text-[10px] uppercase text-ink-dim">
+                    Class Posteriors
+                  </p>
+                  <p
+                    id="bayes-posteriors"
+                    class="mt-1 font-mono text-sm text-ink leading-relaxed"
+                  >
+                    ok — · warn — · crit —
+                  </p>
+                  <div
+                    class="equation mt-3 rounded-lg px-3 py-2 text-xs text-accent-muted"
+                  >
+                    softmax(log prior + Σ log N(x|μ,σ))
+                  </div>
+                </div>
+                <div class="glass rounded-xl p-4">
+                  <p class="text-[10px] uppercase text-ink-dim">
+                    Dataset / Fit
+                  </p>
+                  <p id="bayes-train" class="mt-1 font-mono text-xl text-ink">
+                    n = 0
+                  </p>
+                  <div
+                    id="bayes-counts"
+                    class="equation mt-3 rounded-lg px-3 py-2 text-xs text-accent-muted"
+                  >
+                    counts [0,0,0]
+                  </div>
+                </div>
+                <div class="glass rounded-xl p-4">
+                  <p class="text-[10px] uppercase text-ink-dim">Sufficiency</p>
+                  <p id="bayes-score" class="mt-1 font-mono text-xl text-ink">
+                    0 / 10
+                  </p>
+                  <div
+                    class="equation mt-3 rounded-lg px-3 py-2 text-xs text-accent-muted"
+                  >
+                    ready when score ≥ 6
+                  </div>
+                </div>
+                <div
+                  id="bayes-decision-card"
+                  class="glass rounded-xl p-4 border border-surface-border"
+                >
+                  <p class="text-[10px] uppercase text-ink-dim">Decision</p>
+                  <p
+                    id="bayes-decision"
+                    class="mt-1 text-xl font-semibold text-ink-muted"
+                  >
+                    Standby
+                  </p>
+                  <div
+                    id="bayes-decision-eq"
+                    class="equation mt-3 rounded-lg px-3 py-2 text-xs text-ink-dim"
+                  >
+                    rules active until NB confident
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <div class="glass rounded-2xl p-5 shadow-glass">
+                  <h3 class="text-sm font-medium text-ink mb-3">
+                    How this node decides
+                  </h3>
+                  <div
+                    class="equation rounded-xl px-4 py-4 text-sm leading-relaxed text-ink-muted space-y-2"
+                  >
+                    <p>
+                      1. Rule engine scores ACS712 + DS18B20 features vs
+                      thresholds.
+                    </p>
+                    <p>
+                      2. When the labeled dataset is statistically sufficient,
+                      Gaussian NB is fitted on-device.
+                    </p>
+                    <p>
+                      3. If NB confidence ≥ 60% and ≥ rule confidence, NB
+                      overrides the warning banner.
+                    </p>
+                  </div>
+                  <p class="mt-3 text-xs text-ink-dim">
+                    Features for NB exclude powerW (derived as 230×|I|). Labels
+                    come from threshold + temperature checks on each batch
+                    average.
+                  </p>
+                </div>
+                <div class="glass rounded-2xl p-4 shadow-glass">
+                  <h3 class="mb-2 text-sm font-medium text-ink">
+                    Hazard Posterior Over Time
+                  </h3>
+                  <div
+                    id="chart-bayes"
+                    class="chart-frame rounded-xl overflow-hidden"
+                  ></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ==================== ALERTS ==================== -->
+            <section id="page-alerts" class="page">
+              <div class="page-header">
+                <div>
+                  <p class="page-kicker">Alerts</p>
+                  <h2 class="page-title">Incident Timeline</h2>
+                </div>
+                <div class="flex flex-wrap gap-2 text-xs">
+                  <button
+                    class="alert-filter active rounded-lg border border-accent/40 bg-accent-soft px-3 py-1.5 text-accent-muted"
+                    data-filter="all"
+                  >
+                    All
+                  </button>
+                  <button
+                    class="alert-filter rounded-lg border border-surface-border px-3 py-1.5 text-ink-muted hover:bg-surface-hover"
+                    data-filter="current"
+                  >
+                    Current
+                  </button>
+                  <button
+                    class="alert-filter rounded-lg border border-surface-border px-3 py-1.5 text-ink-muted hover:bg-surface-hover"
+                    data-filter="past"
+                  >
+                    Past
+                  </button>
+                </div>
+              </div>
+
+              <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div class="glass rounded-xl p-3 border-l-2 border-success">
+                  <p class="text-[10px] text-ink-dim">Info / Green</p>
+                  <p
+                    id="alert-count-info"
+                    class="font-mono text-xl text-success-muted"
+                  >
+                    0
+                  </p>
+                </div>
+                <div class="glass rounded-xl p-3 border-l-2 border-yellow-400">
+                  <p class="text-[10px] text-ink-dim">Yellow</p>
+                  <p
+                    id="alert-count-yellow"
+                    class="font-mono text-xl text-yellow-400"
+                  >
+                    0
+                  </p>
+                </div>
+                <div class="glass rounded-xl p-3 border-l-2 border-warning">
+                  <p class="text-[10px] text-ink-dim">Orange / Warn</p>
+                  <p
+                    id="alert-count-orange"
+                    class="font-mono text-xl text-warning-muted"
+                  >
+                    0
+                  </p>
+                </div>
+                <div class="glass rounded-xl p-3 border-l-2 border-danger">
+                  <p class="text-[10px] text-ink-dim">Red / Critical</p>
+                  <p
+                    id="alert-count-red"
+                    class="font-mono text-xl text-danger-muted"
+                  >
+                    0
+                  </p>
+                </div>
+              </div>
+
+              <div
+                id="alerts-timeline"
+                class="relative space-y-0 pl-4 border-l border-surface-border ml-2"
+              >
+                <!-- populated by JS -->
+              </div>
+            </section>
+
+            <!-- ==================== EVENT HISTORY ==================== -->
+            <section id="page-history" class="page">
+              <div class="page-header">
+                <div>
+                  <p class="page-kicker">Event History</p>
+                  <h2 class="page-title">Logged Events</h2>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
+                  >
+                    Export JSON
+                  </button>
+                  <button
+                    class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
+                  >
+                    Export PDF
+                  </button>
+                </div>
+              </div>
+
+              <div class="glass rounded-2xl shadow-glass overflow-hidden">
+                <div
+                  class="flex flex-wrap gap-3 border-b border-surface-border p-4"
+                >
+                  <div class="relative flex-1 min-w-[180px]">
+                    <svg
+                      class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-dim"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                      />
+                    </svg>
+                    <input
+                      id="history-search"
+                      type="search"
+                      placeholder="Search events…"
+                      class="w-full rounded-lg border border-surface-border bg-surface-raised py-2 pl-9 pr-3 text-sm text-ink placeholder:text-ink-dim"
+                    />
+                  </div>
+                  <select
+                    id="history-severity"
+                    class="rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm text-ink-muted"
+                  >
+                    <option value="all">All Severities</option>
+                    <option value="info">Info</option>
+                    <option value="warning">Warning</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                  <select
+                    id="history-region"
+                    class="rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm text-ink-muted"
+                  >
+                    <option value="all">All Regions</option>
+                    <option value="ESP32 Local Node">ESP32 Local Node</option>
+                  </select>
+                  <select
+                    id="history-sort"
+                    class="rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm text-ink-muted"
+                  >
+                    <option value="newest">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                    <option value="severity">Severity</option>
+                  </select>
+                </div>
+
+                <div
+                  class="table-wrap max-h-[520px] border-0 rounded-none border-t border-surface-border"
+                >
+                  <table class="data-table w-full text-left text-sm">
+                    <thead>
+                      <tr
+                        class="text-[11px] uppercase tracking-wider text-ink-dim border-b border-surface-border"
+                      >
+                        <th class="px-4 py-3 font-medium">Timestamp</th>
+                        <th class="px-4 py-3 font-medium">Event</th>
+                        <th class="px-4 py-3 font-medium">Region</th>
+                        <th class="px-4 py-3 font-medium">Sensor</th>
+                        <th class="px-4 py-3 font-medium">Severity</th>
+                        <th class="px-4 py-3 font-medium">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody
+                      id="history-tbody"
+                      class="divide-y divide-surface-border text-ink-muted"
+                    >
+                      <!-- populated by JS -->
+                    </tbody>
+                  </table>
+                </div>
+                <div
+                  class="flex items-center justify-between border-t border-surface-border px-4 py-3 text-xs text-ink-dim"
+                >
+                  <span id="history-count">Showing 0 events</span>
+                  <div class="flex gap-2">
+                    <button
+                      class="rounded border border-surface-border px-2 py-1 hover:bg-surface-hover"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      class="rounded border border-surface-border px-2 py-1 hover:bg-surface-hover"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ==================== SETTINGS ==================== -->
+            <section id="page-settings" class="page">
+              <div class="page-header">
+                <div>
+                  <p class="page-kicker">Settings</p>
+                  <h2 class="page-title">System Configuration</h2>
+                </div>
+              </div>
+
+              <!-- Fire prediction thresholds -->
+              <div class="glass rounded-2xl p-5 shadow-glass mb-4">
+                <div
+                  class="flex flex-wrap items-start justify-between gap-3 mb-4"
+                >
                   <div>
-                    <p class="text-sm text-ink">Auto-refresh</p>
-                    <p class="text-[11px] text-ink-dim">Poll /api/status every 2s</p>
+                    <h3
+                      class="text-sm font-semibold text-ink flex items-center gap-2"
+                    >
+                      <span class="h-1.5 w-1.5 rounded-full bg-danger"></span>
+                      Fire Prediction Parameters
+                    </h3>
+                    <p class="mt-1 text-xs text-ink-dim">
+                      Weighted by importance · warn / critical thresholds ·
+                      adaptive or manual
+                    </p>
                   </div>
-                  <div class="toggle-track on" onclick="this.classList.toggle('on')"><div class="toggle-thumb"></div></div>
+                  <div class="flex flex-wrap items-center gap-3">
+                    <label
+                      class="flex items-center gap-2 text-xs text-ink-muted cursor-pointer"
+                    >
+                      <span>Manual</span>
+                      <div
+                        id="adaptive-toggle"
+                        class="toggle-track"
+                        role="switch"
+                        aria-checked="false"
+                      >
+                        <div class="toggle-thumb"></div>
+                      </div>
+                      <span>Adaptive</span>
+                    </label>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            <!-- Physics -->
-            <div class="glass rounded-2xl p-5 shadow-glass">
-              <h3 class="text-sm font-semibold text-ink mb-4 flex items-center gap-2">
-                <span class="h-1.5 w-1.5 rounded-full bg-warning"></span> Firmware Physics
-              </h3>
-              <div class="grid grid-cols-2 gap-3">
-                <label class="block">
-                  <span class="text-xs text-ink-dim">Line Voltage (V)</span>
-                  <input type="number" value="230" readonly class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink-muted" />
-                </label>
-                <label class="block">
-                  <span class="text-xs text-ink-dim">ACS712 Sensitivity</span>
-                  <input type="text" value="185 mV/A" readonly class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink-muted" />
-                </label>
-                <label class="block">
-                  <span class="text-xs text-ink-dim">Temp Warn Default (°C)</span>
-                  <input type="number" value="55" readonly class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink-muted" />
-                </label>
-                <label class="block">
-                  <span class="text-xs text-ink-dim">Temp Critical Default (°C)</span>
-                  <input type="number" value="70" readonly class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink-muted" />
-                </label>
-              </div>
-              <p class="mt-3 text-[11px] text-ink-dim">Edit live warn/critical values in the threshold table above. Adaptive mode never goes below factory defaults.</p>
-            </div>
+                <div class="table-wrap">
+                  <table class="w-full text-left text-sm">
+                    <thead
+                      class="bg-surface-raised text-[11px] uppercase tracking-wider text-ink-dim"
+                    >
+                      <tr>
+                        <th class="px-3 py-2.5 font-medium">Parameter</th>
+                        <th class="px-3 py-2.5 font-medium">Source</th>
+                        <th class="px-3 py-2.5 font-medium">Importance</th>
+                        <th class="px-3 py-2.5 font-medium">Warn</th>
+                        <th class="px-3 py-2.5 font-medium">Critical</th>
+                        <th class="px-3 py-2.5 font-medium">Live</th>
+                      </tr>
+                    </thead>
+                    <tbody
+                      id="threshold-editor-body"
+                      class="divide-y divide-surface-border"
+                    >
+                      <!-- filled by JS -->
+                    </tbody>
+                  </table>
+                </div>
 
-            <!-- Alerts on device -->
-            <div class="glass rounded-2xl p-5 shadow-glass xl:col-span-2">
-              <h3 class="text-sm font-semibold text-ink mb-4 flex items-center gap-2">
-                <span class="h-1.5 w-1.5 rounded-full bg-danger"></span> Alert Presentation
-              </h3>
-              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div class="flex items-center justify-between rounded-xl border border-surface-border px-4 py-3">
-                  <div>
-                    <p class="text-sm text-ink">Critical / warn banners</p>
-                    <p class="text-[11px] text-ink-dim">Shown on dashboard from rules or GNB</p>
-                  </div>
-                  <div class="toggle-track on" onclick="this.classList.toggle('on')"><div class="toggle-thumb"></div></div>
-                </div>
-                <div class="flex items-center justify-between rounded-xl border border-surface-border px-4 py-3">
-                  <div>
-                    <p class="text-sm text-ink">GNB override when confident</p>
-                    <p class="text-[11px] text-ink-dim">Requires sufficient labeled dataset</p>
-                  </div>
-                  <div class="toggle-track on"><div class="toggle-thumb"></div></div>
+                <div class="mt-4 flex flex-wrap justify-end gap-2">
+                  <button
+                    id="btn-reset-defaults"
+                    class="rounded-lg border border-surface-border px-4 py-2 text-sm text-ink-muted hover:bg-surface-hover transition"
+                  >
+                    Reset Defaults
+                  </button>
+                  <button
+                    id="btn-apply-adaptive"
+                    class="rounded-lg border border-accent/40 bg-accent-soft px-4 py-2 text-sm text-accent-muted hover:bg-accent/20 transition"
+                  >
+                    Apply Adaptive
+                  </button>
+                  <button
+                    id="btn-save-thresholds"
+                    class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-muted transition shadow-glow"
+                  >
+                    Save Manual Thresholds
+                  </button>
                 </div>
               </div>
-            </div>
+
+              <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <!-- Hardware -->
+                <div class="glass rounded-2xl p-5 shadow-glass">
+                  <h3
+                    class="text-sm font-semibold text-ink mb-4 flex items-center gap-2"
+                  >
+                    <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+                    This Node
+                  </h3>
+                  <div class="space-y-3 text-sm">
+                    <div
+                      class="flex justify-between gap-3 border-b border-surface-border pb-2"
+                    >
+                      <span class="text-ink-dim">Board</span>
+                      <span class="font-mono text-ink">ESP32 Dev Module</span>
+                    </div>
+                    <div
+                      class="flex justify-between gap-3 border-b border-surface-border pb-2"
+                    >
+                      <span class="text-ink-dim">Current</span>
+                      <span class="font-mono text-ink">ACS712 · GPIO 34</span>
+                    </div>
+                    <div
+                      class="flex justify-between gap-3 border-b border-surface-border pb-2"
+                    >
+                      <span class="text-ink-dim">Temperature</span>
+                      <span class="font-mono text-ink">DS18B20 · GPIO 4</span>
+                    </div>
+                    <div
+                      class="flex justify-between gap-3 border-b border-surface-border pb-2"
+                    >
+                      <span class="text-ink-dim">SoftAP</span>
+                      <span class="font-mono text-ink">FireBeforeFire</span>
+                    </div>
+                    <div class="flex justify-between gap-3">
+                      <span class="text-ink-dim">Dashboard</span>
+                      <span class="font-mono text-ink">192.168.4.1</span>
+                    </div>
+                    <div class="flex items-center justify-between pt-2">
+                      <div>
+                        <p class="text-sm text-ink">Auto-refresh</p>
+                        <p class="text-[11px] text-ink-dim">
+                          Poll /api/status every 2s
+                        </p>
+                      </div>
+                      <div
+                        class="toggle-track on"
+                        onclick="this.classList.toggle('on')"
+                      >
+                        <div class="toggle-thumb"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Physics -->
+                <div class="glass rounded-2xl p-5 shadow-glass">
+                  <h3
+                    class="text-sm font-semibold text-ink mb-4 flex items-center gap-2"
+                  >
+                    <span class="h-1.5 w-1.5 rounded-full bg-warning"></span>
+                    Firmware Physics
+                  </h3>
+                  <div class="grid grid-cols-2 gap-3">
+                    <label class="block">
+                      <span class="text-xs text-ink-dim">Line Voltage (V)</span>
+                      <input
+                        type="number"
+                        value="230"
+                        readonly
+                        class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink-muted"
+                      />
+                    </label>
+                    <label class="block">
+                      <span class="text-xs text-ink-dim"
+                        >ACS712 Sensitivity</span
+                      >
+                      <input
+                        type="text"
+                        value="185 mV/A"
+                        readonly
+                        class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink-muted"
+                      />
+                    </label>
+                    <label class="block">
+                      <span class="text-xs text-ink-dim"
+                        >Temp Warn Default (°C)</span
+                      >
+                      <input
+                        type="number"
+                        value="55"
+                        readonly
+                        class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink-muted"
+                      />
+                    </label>
+                    <label class="block">
+                      <span class="text-xs text-ink-dim"
+                        >Temp Critical Default (°C)</span
+                      >
+                      <input
+                        type="number"
+                        value="70"
+                        readonly
+                        class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink-muted"
+                      />
+                    </label>
+                  </div>
+                  <p class="mt-3 text-[11px] text-ink-dim">
+                    Edit live warn/critical values in the threshold table above.
+                    Adaptive mode never goes below factory defaults.
+                  </p>
+                </div>
+
+                <!-- Alerts on device -->
+                <div class="glass rounded-2xl p-5 shadow-glass xl:col-span-2">
+                  <h3
+                    class="text-sm font-semibold text-ink mb-4 flex items-center gap-2"
+                  >
+                    <span class="h-1.5 w-1.5 rounded-full bg-danger"></span>
+                    Alert Presentation
+                  </h3>
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div
+                      class="flex items-center justify-between rounded-xl border border-surface-border px-4 py-3"
+                    >
+                      <div>
+                        <p class="text-sm text-ink">Critical / warn banners</p>
+                        <p class="text-[11px] text-ink-dim">
+                          Shown on dashboard from rules or GNB
+                        </p>
+                      </div>
+                      <div
+                        class="toggle-track on"
+                        onclick="this.classList.toggle('on')"
+                      >
+                        <div class="toggle-thumb"></div>
+                      </div>
+                    </div>
+                    <div
+                      class="flex items-center justify-between rounded-xl border border-surface-border px-4 py-3"
+                    >
+                      <div>
+                        <p class="text-sm text-ink">
+                          GNB override when confident
+                        </p>
+                        <p class="text-[11px] text-ink-dim">
+                          Requires sufficient labeled dataset
+                        </p>
+                      </div>
+                      <div class="toggle-track on">
+                        <div class="toggle-thumb"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
-        </section>
-
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
-  </div>
 
-  <!-- Toast -->
-  <div id="toast" class="fixed bottom-6 right-6 z-[60] hidden rounded-xl border border-surface-border glass px-4 py-3 text-sm text-ink shadow-glass animate-slideIn"></div>
+    <!-- Toast -->
+    <div
+      id="toast"
+      class="fixed bottom-6 right-6 z-[60] hidden rounded-xl border border-surface-border glass px-4 py-3 text-sm text-ink shadow-glass animate-slideIn"
+    ></div>
 
-  <script src="scripts.js"></script>
-</body>
+    <script src="scripts.js"></script>
+  </body>
 </html>
