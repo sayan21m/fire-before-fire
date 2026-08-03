@@ -1,11 +1,11 @@
-/* Fire Before Fire — Frontend Dashboard (placeholder data only) */
+/* Fire Before Fire — Live hardware dashboard (ACS712 + DS18B20) */
 
 const PAGE_TITLES = {
   dashboard: 'Dashboard',
   monitoring: 'Monitoring',
-  regions: 'Regions',
+  regions: 'Hardware',
   statistics: 'Statistics',
-  bayesian: 'Bayesian Analysis',
+  bayesian: 'Gaussian NB',
   alerts: 'Alerts',
   history: 'Event History',
   settings: 'Settings'
@@ -40,165 +40,44 @@ const plotlyConfig = {
   toImageButtonOptions: { format: 'png', filename: 'fire-before-fire-chart' }
 };
 
-/* -------------------- Placeholder data -------------------- */
+/* -------------------- Live hardware region (single ESP32 node) -------------------- */
 let regions = [
   {
     id: 1,
-    name: 'Kitchen Circuit A',
-    sensor: 'S-01',
-    appliance: 'Induction Cooktop',
+    name: 'ESP32 Local Node',
+    sensor: 'ACS712+DS18B20',
+    appliance: 'SoftAP circuit monitor',
     material: 'Copper',
-    resistance: 0.042,
+    resistance: 0.04,
     maxCurrent: 16,
     maxTemp: 70,
     status: 'ok'
-  },
-  {
-    id: 2,
-    name: 'HVAC Panel B',
-    sensor: 'S-02',
-    appliance: 'Air Handler',
-    material: 'Copper',
-    resistance: 0.028,
-    maxCurrent: 25,
-    maxTemp: 75,
-    status: 'warn'
-  },
-  {
-    id: 3,
-    name: 'Server Room UPS',
-    sensor: 'S-03',
-    appliance: 'UPS Bank',
-    material: 'Copper',
-    resistance: 0.015,
-    maxCurrent: 32,
-    maxTemp: 65,
-    status: 'ok'
-  },
-  {
-    id: 4,
-    name: 'Workshop Lathe',
-    sensor: 'S-04',
-    appliance: 'CNC Lathe',
-    material: 'Aluminum',
-    resistance: 0.055,
-    maxCurrent: 20,
-    maxTemp: 80,
-    status: 'danger'
   }
 ];
 
-const alerts = [
-  {
-    id: 1,
-    state: 'current',
-    level: 'red',
-    title: 'Temperature slope exceedance',
-    reason: 'dT/dt approached threshold near wire junction',
-    time: '2026-07-26 22:41:12',
-    region: 'HVAC Panel B',
-    sensor: 'S-02',
-    severity: 'critical'
-  },
-  {
-    id: 2,
-    state: 'current',
-    level: 'orange',
-    title: 'Elevated risk score',
-    reason: 'Posterior P(Danger) climbed above soft limit',
-    time: '2026-07-26 22:38:04',
-    region: 'Workshop Lathe',
-    sensor: 'S-04',
-    severity: 'warning'
-  },
-  {
-    id: 3,
-    state: 'current',
-    level: 'yellow',
-    title: 'Current variance spike',
-    reason: 'Short burst variance above rolling baseline',
-    time: '2026-07-26 22:30:55',
-    region: 'Kitchen Circuit A',
-    sensor: 'S-01',
-    severity: 'warning'
-  },
-  {
-    id: 4,
-    state: 'past',
-    level: 'orange',
-    title: 'Transient heating event',
-    reason: 'Startup inrush caused temporary slope rise',
-    time: '2026-07-26 18:12:41',
-    region: 'HVAC Panel B',
-    sensor: 'S-02',
-    severity: 'warning'
-  },
-  {
-    id: 5,
-    state: 'past',
-    level: 'green',
-    title: 'Return to steady state',
-    reason: 'All metrics within nominal operating band',
-    time: '2026-07-26 18:20:03',
-    region: 'HVAC Panel B',
-    sensor: 'S-02',
-    severity: 'info'
-  },
-  {
-    id: 6,
-    state: 'past',
-    level: 'yellow',
-    title: 'Sensor reconnect',
-    reason: 'S-03 brief dropout recovered',
-    time: '2026-07-26 14:05:17',
-    region: 'Server Room UPS',
-    sensor: 'S-03',
-    severity: 'info'
-  },
-  {
-    id: 7,
-    state: 'past',
-    level: 'green',
-    title: 'Daily self-check passed',
-    reason: 'Calibration and health checks completed',
-    time: '2026-07-26 06:00:00',
-    region: 'System',
-    sensor: '—',
-    severity: 'info'
-  }
-];
+let alerts = [];
+let historyEvents = [];
 
-const historyEvents = [
-  { time: '2026-07-26 22:41:12', event: 'Temp slope warning', region: 'HVAC Panel B', sensor: 'S-02', severity: 'critical', value: '0.14 °C/s' },
-  { time: '2026-07-26 22:38:04', event: 'Risk elevated', region: 'Workshop Lathe', sensor: 'S-04', severity: 'warning', value: '48%' },
-  { time: '2026-07-26 22:30:55', event: 'Current variance', region: 'Kitchen Circuit A', sensor: 'S-01', severity: 'warning', value: 'σ 0.41' },
-  { time: '2026-07-26 21:15:22', event: 'Phase: Steady State', region: 'Kitchen Circuit A', sensor: 'S-01', severity: 'info', value: '—' },
-  { time: '2026-07-26 18:20:03', event: 'Alert cleared', region: 'HVAC Panel B', sensor: 'S-02', severity: 'info', value: 'OK' },
-  { time: '2026-07-26 18:12:41', event: 'Transient heating', region: 'HVAC Panel B', sensor: 'S-02', severity: 'warning', value: '0.11 °C/s' },
-  { time: '2026-07-26 16:44:09', event: 'Power peak', region: 'Server Room UPS', sensor: 'S-03', severity: 'info', value: '4.12 kW' },
-  { time: '2026-07-26 14:05:17', event: 'Sensor reconnect', region: 'Server Room UPS', sensor: 'S-03', severity: 'info', value: 'online' },
-  { time: '2026-07-26 11:28:50', event: 'Z-score excursion', region: 'Workshop Lathe', sensor: 'S-04', severity: 'warning', value: '+2.1' },
-  { time: '2026-07-26 09:02:33', event: 'Region config updated', region: 'Kitchen Circuit A', sensor: 'S-01', severity: 'info', value: '—' },
-  { time: '2026-07-26 06:00:00', event: 'Daily self-check', region: 'System', sensor: '—', severity: 'info', value: 'PASS' },
-  { time: '2026-07-25 23:51:18', event: 'Night load drop', region: 'Kitchen Circuit A', sensor: 'S-01', severity: 'info', value: '1.2 A' }
-];
+const HISTORY_MAX = 180; // ~6 min at 2s poll
+const liveSeries = {
+  t: [],
+  current: [],
+  temp: [],
+  power: [],
+  currentSlope: [],
+  tempSlope: [],
+  risk: [],
+  conf: [],
+  varI: [],
+  ma3I: [],
+  ma3T: [],
+  tempAcc: []
+};
 
-let editingRegionId = null;
 let chartsInitialized = { monitoring: false, statistics: false, bayesian: false };
 let alertFilter = 'all';
 
 /* -------------------- Utilities -------------------- */
-function randSeries(n, base, amp, noise = 0.15) {
-  const ys = [];
-  let v = base;
-  for (let i = 0; i < n; i++) {
-    v += (Math.random() - 0.5) * noise;
-    const wave = Math.sin(i / 12) * amp * 0.4 + Math.sin(i / 37) * amp * 0.2;
-    ys.push(+(v + wave).toFixed(3));
-  }
-  return ys;
-}
-
 function timeAxis(n, stepSec = 2) {
   const now = Date.now();
   return Array.from({ length: n }, (_, i) => new Date(now - (n - i) * stepSec * 1000));
@@ -282,42 +161,63 @@ function hexToRgba(hex, alpha) {
 
 function renderSpark(id, data, color) {
   const el = document.getElementById(id);
-  if (!el || typeof Plotly === 'undefined') return;
-  Plotly.newPlot(
-    el,
-    [{
-      y: data,
-      type: 'scatter',
-      mode: 'lines',
-      fill: 'tozeroy',
-      line: { color, width: 1.5, shape: 'spline' },
-      fillcolor: hexToRgba(color, 0.12),
-      hoverinfo: 'skip'
-    }],
-    {
-      margin: { t: 0, r: 0, b: 0, l: 0 },
-      paper_bgcolor: 'rgba(0,0,0,0)',
-      plot_bgcolor: 'rgba(0,0,0,0)',
-      xaxis: { visible: false },
-      yaxis: { visible: false },
-      height: 36
-    },
-    { staticPlot: true, displayModeBar: false, responsive: true }
-  );
+  if (!el) return;
+  const series = data?.length ? data : [0];
+
+  if (typeof Plotly !== 'undefined') {
+    Plotly.react(
+      el,
+      [{
+        y: series,
+        type: 'scatter',
+        mode: 'lines',
+        fill: 'tozeroy',
+        line: { color, width: 1.5, shape: 'spline' },
+        fillcolor: hexToRgba(color, 0.12),
+        hoverinfo: 'skip'
+      }],
+      {
+        margin: { t: 0, r: 0, b: 0, l: 0 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        xaxis: { visible: false },
+        yaxis: { visible: false },
+        height: 36
+      },
+      { staticPlot: true, displayModeBar: false, responsive: true }
+    );
+    return;
+  }
+
+  // SoftAP fallback (no Plotly CDN)
+  const w = el.clientWidth || 160;
+  const h = 36;
+  const min = Math.min(...series);
+  const max = Math.max(...series);
+  const span = max - min || 1;
+  const pts = series.map((v, i) => {
+    const x = (i / Math.max(series.length - 1, 1)) * (w - 2) + 1;
+    const y = h - 2 - ((v - min) / span) * (h - 4);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  el.innerHTML = `<svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline fill="none" stroke="${color}" stroke-width="1.5" points="${pts}"/>
+  </svg>`;
 }
 
 function initDashboardSparks() {
-  renderSpark('spark-current', randSeries(40, 12.4, 0.4, 0.08), '#3B82F6');
-  renderSpark('spark-temp', randSeries(40, 42, 1.2, 0.12), '#22C55E');
-  renderSpark('spark-power', randSeries(40, 2.8, 0.25, 0.06), '#60A5FA');
-  renderSpark('spark-cslope', randSeries(40, 0.01, 0.02, 0.01), '#4ADE80');
-  renderSpark('spark-tslope', randSeries(40, 0.07, 0.04, 0.015), '#F59E0B');
-  renderSpark('spark-conf', randSeries(40, 90, 2, 0.4), '#3B82F6');
+  const tail = (arr) => (arr.length ? arr.slice(-40) : [0]);
+  renderSpark('spark-current', tail(liveSeries.current), '#3B82F6');
+  renderSpark('spark-temp', tail(liveSeries.temp), '#22C55E');
+  renderSpark('spark-power', tail(liveSeries.power), '#60A5FA');
+  renderSpark('spark-cslope', tail(liveSeries.currentSlope), '#4ADE80');
+  renderSpark('spark-tslope', tail(liveSeries.tempSlope), '#F59E0B');
+  renderSpark('spark-conf', tail(liveSeries.conf), '#3B82F6');
 }
 
 /* -------------------- Monitoring charts -------------------- */
 function makeLineChart(id, y, color, yTitle, threshold) {
-  const x = timeAxis(y.length);
+  const x = liveSeries.t.length === y.length ? liveSeries.t : timeAxis(y.length);
   const traces = [{
     x,
     y,
@@ -350,178 +250,74 @@ function makeLineChart(id, y, color, yTitle, threshold) {
 }
 
 function initMonitoringCharts(force = false) {
+  if (typeof Plotly === 'undefined') return;
+  const n = Math.max(liveSeries.current.length, 2);
+  const cur = liveSeries.current.length ? liveSeries.current : [0, 0];
+  const tmp = liveSeries.temp.length ? liveSeries.temp : [0, 0];
+  const pwr = liveSeries.power.length ? liveSeries.power : [0, 0];
+  const csl = liveSeries.currentSlope.length ? liveSeries.currentSlope : [0, 0];
+  const tsl = liveSeries.tempSlope.length ? liveSeries.tempSlope : [0, 0];
+  const th = thresholdCache;
+
   if (chartsInitialized.monitoring && !force) {
-    Plotly.Plots.resize('chart-current');
-    Plotly.Plots.resize('chart-temp');
-    Plotly.Plots.resize('chart-power');
-    Plotly.Plots.resize('chart-cslope');
-    Plotly.Plots.resize('chart-tslope');
+    const x = liveSeries.t.length ? liveSeries.t : timeAxis(n);
+    Plotly.react('chart-current', [{ x, y: cur, type: 'scatter', mode: 'lines', line: { color: '#3B82F6', width: 2 } }], { ...plotlyLayoutBase, yaxis: { ...plotlyLayoutBase.yaxis, title: 'Current (A)' }, xaxis: { ...plotlyLayoutBase.xaxis, type: 'date' } }, plotlyConfig);
+    Plotly.react('chart-temp', [
+      { x, y: tmp, type: 'scatter', mode: 'lines', line: { color: '#22C55E', width: 2 } },
+      { x, y: x.map(() => th.temp?.critical ?? 70), type: 'scatter', mode: 'lines', line: { color: '#EF4444', width: 1, dash: 'dot' } }
+    ], { ...plotlyLayoutBase, yaxis: { ...plotlyLayoutBase.yaxis, title: 'Temperature (°C)' }, xaxis: { ...plotlyLayoutBase.xaxis, type: 'date' } }, plotlyConfig);
+    Plotly.react('chart-power', [{ x, y: pwr, type: 'scatter', mode: 'lines', line: { color: '#60A5FA', width: 2 } }], { ...plotlyLayoutBase, yaxis: { ...plotlyLayoutBase.yaxis, title: 'Power (kW)' }, xaxis: { ...plotlyLayoutBase.xaxis, type: 'date' } }, plotlyConfig);
+    Plotly.react('chart-cslope', [
+      { x, y: csl, type: 'scatter', mode: 'lines', line: { color: '#4ADE80', width: 2 } },
+      { x, y: x.map(() => th.currentSlope?.warn ?? 0.5), type: 'scatter', mode: 'lines', line: { color: '#EF4444', width: 1, dash: 'dot' } }
+    ], { ...plotlyLayoutBase, yaxis: { ...plotlyLayoutBase.yaxis, title: 'dI/dt (A/s)' }, xaxis: { ...plotlyLayoutBase.xaxis, type: 'date' } }, plotlyConfig);
+    Plotly.react('chart-tslope', [
+      { x, y: tsl, type: 'scatter', mode: 'lines', line: { color: '#F59E0B', width: 2 } },
+      { x, y: x.map(() => th.tempSlope?.warn ?? 0.08), type: 'scatter', mode: 'lines', line: { color: '#EF4444', width: 1, dash: 'dot' } }
+    ], { ...plotlyLayoutBase, yaxis: { ...plotlyLayoutBase.yaxis, title: 'dT/dt (°C/s)' }, xaxis: { ...plotlyLayoutBase.xaxis, type: 'date' } }, plotlyConfig);
     return;
   }
-  makeLineChart('chart-current', randSeries(150, 12.4, 0.6), '#3B82F6', 'Current (A)');
-  makeLineChart('chart-temp', randSeries(150, 42.5, 2.2), '#22C55E', 'Temperature (°C)', 70);
-  makeLineChart('chart-power', randSeries(150, 2.85, 0.35), '#60A5FA', 'Power (kW)');
-  makeLineChart('chart-cslope', randSeries(150, 0.012, 0.025), '#4ADE80', 'dI/dt (A/s)', 0.12);
-  makeLineChart('chart-tslope', randSeries(180, 0.08, 0.05), '#F59E0B', 'dT/dt (°C/s)', 0.15);
+
+  makeLineChart('chart-current', cur, '#3B82F6', 'Current (A)');
+  makeLineChart('chart-temp', tmp, '#22C55E', 'Temperature (°C)', th.temp?.critical ?? 70);
+  makeLineChart('chart-power', pwr, '#60A5FA', 'Power (kW)');
+  makeLineChart('chart-cslope', csl, '#4ADE80', 'dI/dt (A/s)', th.currentSlope?.warn ?? 0.5);
+  makeLineChart('chart-tslope', tsl, '#F59E0B', 'dT/dt (°C/s)', th.tempSlope?.warn ?? 0.08);
   chartsInitialized.monitoring = true;
 }
 
 function refreshMonitoringCharts() {
   chartsInitialized.monitoring = false;
   initMonitoringCharts(true);
-  showToast('Monitoring charts refreshed (placeholder)');
+  showToast('Monitoring charts refreshed from live sensors');
 }
 
 /* -------------------- Statistics charts -------------------- */
 function initStatisticsCharts(force = false) {
+  if (typeof Plotly === 'undefined') return;
+  if (liveSeries.current.length >= 3) {
+    refreshStatisticsFromLive();
+    return;
+  }
   if (chartsInitialized.statistics && !force) {
     ['chart-hist', 'chart-gauss', 'chart-trend'].forEach((id) => Plotly.Plots.resize(id));
     return;
   }
-
-  const samples = randSeries(400, 12.3, 0.5, 0.35);
-
-  Plotly.newPlot(
-    'chart-hist',
-    [{
-      x: samples,
-      type: 'histogram',
-      nbinsx: 24,
-      marker: { color: 'rgba(59,130,246,0.75)', line: { color: '#1E3A5F', width: 1 } }
-    }],
-    {
-      ...plotlyLayoutBase,
-      bargap: 0.05,
-      xaxis: { ...plotlyLayoutBase.xaxis, title: 'Current (A)' },
-      yaxis: { ...plotlyLayoutBase.yaxis, title: 'Count' }
-    },
-    plotlyConfig
-  );
-
-  const mu = 12.31;
-  const sigma = 0.29;
-  const gx = [];
-  const gy = [];
-  for (let i = 0; i <= 80; i++) {
-    const x = mu - 3.5 * sigma + (i / 80) * 7 * sigma;
-    const y = (1 / (sigma * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - mu) / sigma) ** 2);
-    gx.push(x);
-    gy.push(y);
-  }
-
-  Plotly.newPlot(
-    'chart-gauss',
-    [{
-      x: gx,
-      y: gy,
-      type: 'scatter',
-      mode: 'lines',
-      fill: 'tozeroy',
-      line: { color: '#22C55E', width: 2 },
-      fillcolor: 'rgba(34,197,94,0.12)'
-    }],
-    {
-      ...plotlyLayoutBase,
-      xaxis: { ...plotlyLayoutBase.xaxis, title: 'Value' },
-      yaxis: { ...plotlyLayoutBase.yaxis, title: 'Density' }
-    },
-    plotlyConfig
-  );
-
-  const trendY = randSeries(120, 12.2, 0.7);
-  const ma = trendY.map((_, i, arr) => {
-    const w = arr.slice(Math.max(0, i - 7), i + 1);
-    return w.reduce((a, b) => a + b, 0) / w.length;
-  });
-
-  Plotly.newPlot(
-    'chart-trend',
-    [
-      {
-        x: timeAxis(trendY.length, 5),
-        y: trendY,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Signal',
-        line: { color: 'rgba(148,163,184,0.55)', width: 1 },
-        showlegend: true
-      },
-      {
-        x: timeAxis(ma.length, 5),
-        y: ma,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Rolling Mean',
-        line: { color: '#3B82F6', width: 2.5 },
-        showlegend: true
-      }
-    ],
-    {
-      ...plotlyLayoutBase,
-      showlegend: true,
-      legend: { orientation: 'h', y: 1.12, font: { size: 11 } },
-      xaxis: { ...plotlyLayoutBase.xaxis, type: 'date' },
-      yaxis: { ...plotlyLayoutBase.yaxis, title: 'Current (A)' }
-    },
-    plotlyConfig
-  );
-
-  chartsInitialized.statistics = true;
+  // waiting for live samples
+  chartsInitialized.statistics = false;
 }
 
 /* -------------------- Bayesian chart -------------------- */
 function initBayesianCharts(force = false) {
+  if (typeof Plotly === 'undefined') return;
+  if (liveSeries.risk.length >= 2) {
+    refreshBayesianFromLive(liveState || { riskPercent: liveSeries.risk.at(-1), status: 'ok' });
+    return;
+  }
   if (chartsInitialized.bayesian && !force) {
     Plotly.Plots.resize('chart-bayes');
     return;
   }
-
-  const x = [];
-  const prior = [];
-  const posterior = [];
-  for (let i = 0; i <= 100; i++) {
-    const t = i / 100;
-    x.push(t);
-    // Beta-like shapes (visual placeholder)
-    prior.push(Math.pow(t, 1.2) * Math.pow(1 - t, 4.5) * 18);
-    posterior.push(Math.pow(t, 2.4) * Math.pow(1 - t, 2.8) * 14);
-  }
-
-  Plotly.newPlot(
-    'chart-bayes',
-    [
-      {
-        x,
-        y: prior,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Prior',
-        fill: 'tozeroy',
-        line: { color: '#64748B', width: 2 },
-        fillcolor: 'rgba(100,116,139,0.15)'
-      },
-      {
-        x,
-        y: posterior,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Posterior',
-        fill: 'tozeroy',
-        line: { color: '#F59E0B', width: 2 },
-        fillcolor: 'rgba(245,158,11,0.12)'
-      }
-    ],
-    {
-      ...plotlyLayoutBase,
-      showlegend: true,
-      legend: { orientation: 'h', y: 1.12 },
-      xaxis: { ...plotlyLayoutBase.xaxis, title: 'θ (heating hypothesis)' },
-      yaxis: { ...plotlyLayoutBase.yaxis, title: 'Density' }
-    },
-    plotlyConfig
-  );
-
-  chartsInitialized.bayesian = true;
 }
 
 /* -------------------- Regions -------------------- */
@@ -533,102 +329,57 @@ function statusMeta(status) {
 
 function renderRegions() {
   const grid = document.getElementById('regions-grid');
-  grid.innerHTML = regions
-    .map((r) => {
-      const s = statusMeta(r.status);
-      return `
-      <article class="glass glass-hover rounded-2xl p-5 shadow-glass">
+  if (!grid) return;
+  const r = regions[0];
+  const s = statusMeta(r.status);
+  const live = liveState || {};
+  const f = live.features || {};
+  grid.innerHTML = `
+      <article class="glass glass-hover section-panel shadow-glass h-full flex flex-col sm:col-span-2 xl:col-span-3">
         <div class="flex items-start justify-between gap-2">
-          <div>
-            <h3 class="text-base font-semibold text-ink">${r.name}</h3>
-            <p class="mt-0.5 text-xs text-ink-dim">${r.appliance} · Sensor ${r.sensor}</p>
+          <div class="min-w-0">
+            <h3 class="text-base font-semibold text-ink truncate">${r.name}</h3>
+            <p class="mt-0.5 text-xs text-ink-dim">ACS712 (GPIO 34) · DS18B20 (GPIO 4) · SoftAP 192.168.4.1</p>
           </div>
-          <span class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold uppercase ${s.cls}">
+          <span class="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold uppercase ${s.cls}">
             <span class="status-dot ${s.dot}"></span>${s.label}
           </span>
         </div>
-        <dl class="mt-4 grid grid-cols-2 gap-3 text-xs">
+        <dl class="mt-4 grid grid-cols-2 gap-3 text-xs md:grid-cols-4 flex-1">
           <div>
-            <dt class="text-ink-dim">Wire Material</dt>
-            <dd class="mt-0.5 font-medium text-ink">${r.material}</dd>
+            <dt class="text-ink-dim">Live current</dt>
+            <dd class="mt-0.5 font-mono text-ink">${fmtNum(f.current, 2)} A</dd>
           </div>
           <div>
-            <dt class="text-ink-dim">Wire Resistance</dt>
-            <dd class="mt-0.5 font-mono text-ink">${r.resistance} Ω</dd>
+            <dt class="text-ink-dim">Live temperature</dt>
+            <dd class="mt-0.5 font-mono text-ink">${fmtNum(f.temp, 1)} °C</dd>
           </div>
           <div>
-            <dt class="text-ink-dim">Max Current</dt>
+            <dt class="text-ink-dim">Est. power (230×|I|)</dt>
+            <dd class="mt-0.5 font-mono text-ink">${fmtNum((f.power || 0) / 1000, 2)} kW</dd>
+          </div>
+          <div>
+            <dt class="text-ink-dim">Prediction</dt>
+            <dd class="mt-0.5 font-mono text-ink">${live.predictionSource || 'rules'}</dd>
+          </div>
+          <div>
+            <dt class="text-ink-dim">Dataset rows</dt>
+            <dd class="mt-0.5 font-mono text-ink">${live.datasetCount ?? 0} / 100</dd>
+          </div>
+          <div>
+            <dt class="text-ink-dim">Batch window</dt>
+            <dd class="mt-0.5 font-mono text-ink">${live.batchCount ?? 0} / ${live.batchSize ?? 60}</dd>
+          </div>
+          <div>
+            <dt class="text-ink-dim">Default max current</dt>
             <dd class="mt-0.5 font-mono text-ink">${r.maxCurrent} A</dd>
           </div>
           <div>
-            <dt class="text-ink-dim">Max Safe Temp</dt>
+            <dt class="text-ink-dim">Default max temp</dt>
             <dd class="mt-0.5 font-mono text-ink">${r.maxTemp} °C</dd>
           </div>
         </dl>
-        <div class="mt-4 flex gap-2">
-          <button onclick="editRegion(${r.id})" class="flex-1 rounded-lg border border-surface-border py-2 text-xs text-ink-muted hover:bg-surface-hover transition">Edit</button>
-          <button onclick="deleteRegion(${r.id})" class="flex-1 rounded-lg border border-danger/30 py-2 text-xs text-danger-muted hover:bg-danger-soft/40 transition">Delete</button>
-        </div>
       </article>`;
-    })
-    .join('');
-}
-
-function openRegionModal(region = null) {
-  editingRegionId = region ? region.id : null;
-  document.getElementById('rm-name').value = region?.name || '';
-  document.getElementById('rm-sensor').value = region?.sensor || '';
-  document.getElementById('rm-appliance').value = region?.appliance || '';
-  document.getElementById('rm-material').value = region?.material || 'Copper';
-  document.getElementById('rm-resistance').value = region?.resistance ?? '';
-  document.getElementById('rm-maxcurrent').value = region?.maxCurrent ?? '';
-  document.getElementById('rm-maxtemp').value = region?.maxTemp ?? '';
-  const modal = document.getElementById('region-modal');
-  modal.classList.remove('hidden');
-  modal.classList.add('flex');
-}
-
-function closeRegionModal() {
-  const modal = document.getElementById('region-modal');
-  modal.classList.add('hidden');
-  modal.classList.remove('flex');
-  editingRegionId = null;
-}
-
-function editRegion(id) {
-  const region = regions.find((r) => r.id === id);
-  if (region) openRegionModal(region);
-}
-
-function deleteRegion(id) {
-  if (!confirm('Delete this region? (UI placeholder)')) return;
-  regions = regions.filter((r) => r.id !== id);
-  renderRegions();
-  showToast('Region removed (placeholder)');
-}
-
-function saveRegion() {
-  const payload = {
-    name: document.getElementById('rm-name').value.trim() || 'Untitled Region',
-    sensor: document.getElementById('rm-sensor').value.trim() || 'S-XX',
-    appliance: document.getElementById('rm-appliance').value.trim() || 'Unknown',
-    material: document.getElementById('rm-material').value,
-    resistance: parseFloat(document.getElementById('rm-resistance').value) || 0,
-    maxCurrent: parseFloat(document.getElementById('rm-maxcurrent').value) || 0,
-    maxTemp: parseFloat(document.getElementById('rm-maxtemp').value) || 0,
-    status: 'ok'
-  };
-
-  if (editingRegionId) {
-    regions = regions.map((r) => (r.id === editingRegionId ? { ...r, ...payload } : r));
-    showToast('Region updated (placeholder)');
-  } else {
-    const id = Math.max(0, ...regions.map((r) => r.id)) + 1;
-    regions.push({ id, ...payload });
-    showToast('Region added (placeholder)');
-  }
-  renderRegions();
-  closeRegionModal();
 }
 
 /* -------------------- Alerts -------------------- */
@@ -781,13 +532,15 @@ document.addEventListener('DOMContentLoaded', () => {
   renderRegions();
   renderAlerts();
   renderHistory();
-  animateCounters();
+  // live values come from /api/status — skip placeholder counter animation
 
-  // Delay sparklines slightly so layout is ready
   setTimeout(initDashboardSparks, 80);
 
   // Soft loading skeleton flash on first paint (optional polish)
   document.getElementById('last-update').textContent = 'just now';
+
+  initPredictionUI();
+  setInterval(pollLiveStatus, 2000);
 
   window.addEventListener('resize', () => {
     const active = document.querySelector('.page.active')?.id;
@@ -808,13 +561,771 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+/* -------------------- Fire prediction (live + settings) -------------------- */
+const PARAM_META = [
+  { key: 'current', label: 'Current', source: 'ACS712', stars: 4, unit: 'A', step: 0.1 },
+  { key: 'temp', label: 'Temperature', source: 'DS18B20', stars: 5, unit: 'C', step: 0.1 },
+  { key: 'ma3I', label: 'Moving Avg Current', source: 'Derived', stars: 3, unit: 'A', step: 0.1 },
+  { key: 'ma3T', label: 'Moving Avg Temperature', source: 'Derived', stars: 4, unit: 'C', step: 0.1 },
+  { key: 'currentSlope', label: 'Current Slope', source: 'Derived', stars: 4, unit: 'A/s', step: 0.01 },
+  { key: 'tempSlope', label: 'Temperature Slope', source: 'Derived', stars: 5, unit: 'C/s', step: 0.01 },
+  { key: 'varI', label: 'Current Variance', source: 'Derived', stars: 3, unit: '', step: 0.01 },
+  { key: 'power', label: 'Estimated Power', source: 'Derived', stars: 4, unit: 'W', step: 10 },
+  { key: 'tempAcc', label: 'Temperature Acceleration', source: 'Derived', stars: 5, unit: 'C/s2', step: 0.001 }
+];
+
+const DEFAULT_THRESHOLDS = {
+  current: { warn: 12, critical: 16 },
+  temp: { warn: 55, critical: 70 },
+  ma3I: { warn: 11, critical: 15 },
+  ma3T: { warn: 50, critical: 65 },
+  currentSlope: { warn: 0.8, critical: 2.0 },
+  tempSlope: { warn: 0.3, critical: 0.6 },
+  varI: { warn: 0.5, critical: 1.5 },
+  power: { warn: 2500, critical: 3500 },
+  tempAcc: { warn: 0.15, critical: 0.35 }
+};
+
+let liveState = null;
+let thresholdCache = { ...DEFAULT_THRESHOLDS };
+let adaptiveEnabled = false;
+
+function starHtml(n) {
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
+}
+
+function levelBorder(level) {
+  if (level === 'critical') return 'border-danger';
+  if (level === 'warn') return 'border-warning';
+  return 'border-success';
+}
+
+function levelDot(level) {
+  if (level === 'critical') return 'status-danger';
+  if (level === 'warn') return 'status-warn';
+  return 'status-ok';
+}
+
+function fmtNum(v, digits = 3) {
+  if (v == null || Number.isNaN(v)) return '—';
+  return Number(v).toFixed(digits);
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function renderThresholdEditor(thresholds, liveValues) {
+  const body = document.getElementById('threshold-editor-body');
+  if (!body) return;
+  const disabled = adaptiveEnabled ? 'disabled' : '';
+  body.innerHTML = PARAM_META.map((p) => {
+    const th = thresholds[p.key] || DEFAULT_THRESHOLDS[p.key];
+    const live = liveValues?.[p.key];
+    return `<tr class="hover:bg-surface-hover/40">
+      <td class="px-3 py-2.5 text-ink">${p.label}</td>
+      <td class="px-3 py-2.5 text-ink-dim text-xs">${p.source}</td>
+      <td class="px-3 py-2.5 font-mono text-xs text-warning-muted" title="${p.stars}/5">${starHtml(p.stars)}</td>
+      <td class="px-3 py-2.5">
+        <input data-th-key="${p.key}" data-th-field="warn" type="number" step="${p.step}" value="${th.warn}"
+          ${disabled}
+          class="w-28 rounded-lg border border-surface-border bg-surface-raised px-2 py-1.5 text-sm font-mono text-ink disabled:opacity-50" />
+        <span class="ml-1 text-[10px] text-ink-dim">${p.unit}</span>
+      </td>
+      <td class="px-3 py-2.5">
+        <input data-th-key="${p.key}" data-th-field="critical" type="number" step="${p.step}" value="${th.critical}"
+          ${disabled}
+          class="w-28 rounded-lg border border-surface-border bg-surface-raised px-2 py-1.5 text-sm font-mono text-ink disabled:opacity-50" />
+        <span class="ml-1 text-[10px] text-ink-dim">${p.unit}</span>
+      </td>
+      <td class="px-3 py-2.5 font-mono text-xs text-ink-muted">${live == null ? '—' : fmtNum(live, p.step < 0.01 ? 4 : 3)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function readThresholdInputs() {
+  const out = {};
+  PARAM_META.forEach((p) => {
+    out[p.key] = { warn: DEFAULT_THRESHOLDS[p.key].warn, critical: DEFAULT_THRESHOLDS[p.key].critical };
+  });
+  document.querySelectorAll('[data-th-key]').forEach((el) => {
+    const key = el.dataset.thKey;
+    const field = el.dataset.thField;
+    out[key][field] = parseFloat(el.value);
+  });
+  return out;
+}
+
+function setAdaptiveToggle(on) {
+  adaptiveEnabled = on;
+  const t = document.getElementById('adaptive-toggle');
+  if (t) {
+    t.classList.toggle('on', on);
+    t.setAttribute('aria-checked', on ? 'true' : 'false');
+  }
+  const badge = document.getElementById('mode-badge');
+  if (badge) {
+    badge.textContent = on ? 'adaptive' : 'manual';
+    badge.className = on
+      ? 'ml-2 rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-muted'
+      : 'ml-2 rounded-md bg-warning-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-muted';
+  }
+}
+
+function renderGnbBadge(gnb, source) {
+  const badge = document.getElementById('gnb-badge');
+  if (!badge || !gnb) return;
+  const conf = ((gnb.confidence || 0) * 100).toFixed(0);
+  if (gnb.active || source === 'gnb') {
+    badge.textContent = `gnb: ${gnb.predLabel || 'ok'} ${conf}%`;
+    badge.className =
+      'rounded-md bg-success-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success-muted';
+    badge.title = `Gaussian NB active · score ${gnb.score}/10 · ${gnb.status || ''}`;
+  } else if (gnb.ready) {
+    badge.textContent = `gnb: ready ${conf}%`;
+    badge.className =
+      'rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-muted';
+    badge.title = `Model fitted — standby until conf ≥ rule · ${gnb.status || ''}`;
+  } else {
+    badge.textContent = `gnb: ${gnb.score || 0}/10`;
+    badge.className =
+      'rounded-md bg-surface-raised px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-dim';
+    badge.title = gnb.status || 'Collecting labeled dataset rows';
+  }
+}
+
+function renderWarnings(warnings, meta = {}) {
+  const box = document.getElementById('prediction-warnings');
+  if (!box) return;
+  if (!warnings?.length) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  box.classList.remove('hidden');
+  const source = meta.source || 'rules';
+  box.innerHTML = warnings
+    .map((w) => {
+      const crit = w.level === 'critical';
+      const fromGnb = w.source === 'gnb' || source === 'gnb' || w.param === 'gnb';
+      const detail = fromGnb
+        ? `NB confidence ${fmtNum(w.value, 1)}% (min ${fmtNum(w.threshold, 1)}%) · overrides rules`
+        : `Value ${fmtNum(w.value)} exceeds ${w.level} threshold ${fmtNum(w.threshold)}`;
+      return `<div class="glass rounded-xl px-4 py-3 border-l-4 ${crit ? 'border-danger shadow-glow-danger' : 'border-warning'} ${crit ? 'alert-blink' : ''}">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p class="text-sm font-semibold ${crit ? 'text-danger-muted' : 'text-warning-muted'}">${crit ? 'CRITICAL' : 'WARNING'} — ${w.label}</p>
+            <p class="text-xs text-ink-dim mt-0.5">${detail}</p>
+          </div>
+          <span class="font-mono text-xs text-ink-muted">${fromGnb ? 'GNB' : w.param}</span>
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
+function renderParamStatus(rows) {
+  const grid = document.getElementById('param-status-grid');
+  if (!grid || !rows) return;
+  grid.innerHTML = rows
+    .map((r) => {
+      const pct = r.critical > 0 ? Math.min(100, (r.value / r.critical) * 100) : 0;
+      return `<div class="glass param-card ${levelBorder(r.level)}">
+        <div class="flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <p class="text-[10px] uppercase tracking-wider text-ink-dim truncate">${r.label}</p>
+            <p class="font-mono text-sm text-ink">${fmtNum(r.value)} <span class="text-ink-dim text-[10px]">${r.unit || ''}</span></p>
+          </div>
+          <span class="status-dot ${levelDot(r.level)} shrink-0"></span>
+        </div>
+        <div class="mt-auto pt-2 h-1 rounded-full bg-surface-raised overflow-hidden">
+          <div class="h-full rounded-full ${r.level === 'critical' ? 'bg-danger' : r.level === 'warn' ? 'bg-warning' : 'bg-success'}" style="width:${pct.toFixed(0)}%"></div>
+        </div>
+        <p class="mt-1 text-[10px] font-mono text-ink-dim">W ${fmtNum(r.warn)} · C ${fmtNum(r.critical)} · ★${r.importance}</p>
+      </div>`;
+    })
+    .join('');
+}
+
+function levelFromParam(data, key) {
+  const row = (data.paramStatus || []).find((p) => p.key === key);
+  return row?.level || 'ok';
+}
+
+function setDot(id, level) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = `status-dot mt-1 ${levelDot(level)}`;
+}
+
+function setText(id, text, cls) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  if (cls) el.className = cls;
+}
+
+function pushLiveSample(data) {
+  const f = data.features || {};
+  const now = new Date();
+  const conf = Math.min(
+    99,
+    35 + (data.datasetCount || 0) * 8 + ((data.batchCount || 0) / Math.max(data.batchSize || 60, 1)) * 25
+  );
+
+  const push = (key, v) => {
+    liveSeries[key].push(v);
+    if (liveSeries[key].length > HISTORY_MAX) liveSeries[key].shift();
+  };
+
+  push('t', now);
+  push('current', f.current ?? 0);
+  push('temp', f.temp ?? 0);
+  push('power', (f.power || 0) / 1000);
+  push('currentSlope', f.currentSlope ?? 0);
+  push('tempSlope', f.tempSlope ?? 0);
+  push('risk', data.riskPercent ?? 0);
+  push('conf', conf);
+  push('varI', f.varI ?? 0);
+  push('ma3I', f.ma3I ?? 0);
+  push('ma3T', f.ma3T ?? 0);
+  push('tempAcc', f.tempAcc ?? 0);
+  return conf;
+}
+
+function updateOperatingPhase(data, f) {
+  const th = data.thresholds || {};
+  let phase = 'steady';
+  if (data.status === 'danger' || (data.warnings || []).some((w) => w.level === 'critical')) phase = 'fault';
+  else if (
+    Math.abs(f.tempSlope || 0) > (th.tempSlope?.warn ?? 0.08) * 0.6 ||
+    Math.abs(f.currentSlope || 0) > (th.currentSlope?.warn ?? 0.5) * 0.6
+  ) phase = 'transient';
+  else if (Math.abs(f.current || 0) < 0.15) phase = 'idle';
+
+  const labels = { idle: 'Idle', steady: 'Steady State', transient: 'Transient', fault: 'Fault' };
+  setText('kpi-phase', labels[phase]);
+  setDot('dot-phase', phase === 'fault' ? 'critical' : phase === 'transient' ? 'warn' : 'ok');
+
+  ['idle', 'steady', 'transient', 'fault'].forEach((p) => {
+    const el = document.getElementById(`phase-${p}`);
+    if (!el) return;
+    el.className = p === phase ? 'phase-chip is-active' : 'phase-chip';
+    const label = el.querySelector('.label') || el.querySelector('div');
+    if (label) label.className = 'label';
+  });
+
+  setText(
+    'phase-meta',
+    `ESP32 · ACS712+DS18B20 · batch ${data.batchCount || 0}/${data.batchSize || 60} · dataset ${data.datasetCount || 0}`
+  );
+}
+
+function updateKpis(data) {
+  const f = data.features || {};
+  const th = data.thresholds || {};
+  const conf = pushLiveSample(data);
+
+  const set = (id, v, digits) => {
+    const el = document.getElementById(id);
+    if (el && v != null && !Number.isNaN(v)) el.textContent = fmtNum(v, digits);
+  };
+  set('kpi-current', f.current, 2);
+  set('kpi-temp', f.temp, 1);
+  set('kpi-power', (f.power || 0) / 1000, 2);
+  set('kpi-cslope', f.currentSlope, 3);
+  set('kpi-tslope', f.tempSlope, 3);
+  set('kpi-risk', data.riskPercent, 0);
+  set('kpi-conf', conf, 0);
+  set('sensor-current', f.current, 2);
+  set('sensor-temp', f.temp, 1);
+
+  const batchEl = document.getElementById('sensor-batch');
+  if (batchEl) batchEl.textContent = `${data.batchCount || 0}/${data.batchSize || 60}`;
+
+  const gnb = data.gnb || {};
+  const gnbEl = document.getElementById('sensor-gnb');
+  if (gnbEl) {
+    gnbEl.textContent = gnb.active
+      ? `${gnb.predLabel || 'ok'} ${(gnb.confidence * 100).toFixed(0)}%`
+      : gnb.ready
+        ? `ready ${(gnb.confidence * 100).toFixed(0)}%`
+        : gnb.status || 'collecting';
+  }
+  const gnbBadge = document.getElementById('badge-gnb-hw');
+  if (gnbBadge) {
+    if (gnb.active) {
+      gnbBadge.textContent = 'GNB';
+      gnbBadge.className =
+        'rounded bg-success-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success-muted';
+    } else if (gnb.ready) {
+      gnbBadge.textContent = 'Ready';
+      gnbBadge.className =
+        'rounded bg-accent-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-accent-muted';
+    } else {
+      gnbBadge.textContent = 'Rules';
+      gnbBadge.className =
+        'rounded bg-surface-raised px-1.5 py-0.5 text-[9px] font-semibold uppercase text-ink-dim';
+    }
+  }
+
+  const bar = document.getElementById('kpi-risk-bar');
+  if (bar) bar.style.width = `${Math.min(100, data.riskPercent || 0).toFixed(0)}%`;
+
+  const badge = document.getElementById('kpi-risk-badge');
+  if (badge) {
+    const s = data.status || 'ok';
+    badge.textContent = s === 'danger' ? 'Danger' : s === 'caution' ? 'Caution' : 'Normal';
+    badge.className =
+      s === 'danger'
+        ? 'rounded-md bg-danger-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger-muted'
+        : s === 'caution'
+          ? 'rounded-md bg-warning-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-muted'
+          : 'rounded-md bg-success-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success-muted';
+  }
+
+  const liveDot = document.getElementById('live-status-dot');
+  if (liveDot) {
+    liveDot.className = `status-dot animate-pulseLive ${
+      data.status === 'danger' ? 'status-danger' : data.status === 'caution' ? 'status-warn' : 'status-ok'
+    }`;
+  }
+
+  // KPI status from thresholds
+  setDot('dot-current', levelFromParam(data, 'current'));
+  setDot('dot-temp', levelFromParam(data, 'temp'));
+  setDot('dot-power', levelFromParam(data, 'power'));
+  setDot('dot-cslope', levelFromParam(data, 'currentSlope'));
+  setDot('dot-tslope', levelFromParam(data, 'tempSlope'));
+  setDot('dot-conf', conf >= 70 ? 'ok' : conf >= 40 ? 'warn' : 'ok');
+
+  const lblCls = (lvl) =>
+    lvl === 'critical' ? 'text-danger-muted' : lvl === 'warn' ? 'text-warning-muted' : 'text-success-muted';
+  const lblTxt = (lvl, ok, warn) => (lvl === 'critical' ? 'critical' : lvl === 'warn' ? warn : ok);
+
+  const lc = levelFromParam(data, 'current');
+  setText('lbl-current', lblTxt(lc, '▲ stable', 'elevated'), lblCls(lc));
+  setText('sub-current', `Δ ${fmtNum(f.currentSlope, 3)} A/s`);
+
+  const lt = levelFromParam(data, 'temp');
+  setText('lbl-temp', lblTxt(lt, 'within band', 'heating'), lblCls(lt));
+  setText('sub-temp', `Δ ${fmtNum(f.tempSlope, 3)} °C/s`);
+
+  const lp = levelFromParam(data, 'power');
+  setText('lbl-power', lblTxt(lp, 'nominal load', 'high load'), lblCls(lp));
+
+  const lcs = levelFromParam(data, 'currentSlope');
+  setText('lbl-cslope', lblTxt(lcs, 'no runaway', 'rising fast'), lblCls(lcs));
+  setText('sub-cslope', `thresh ${fmtNum(th.currentSlope?.warn ?? 0.5, 2)}`);
+
+  const lts = levelFromParam(data, 'tempSlope');
+  setText('lbl-tslope', lblTxt(lts, 'stable rise', 'elevated rise'), lblCls(lts));
+  setText('sub-tslope', `thresh ${fmtNum(th.tempSlope?.warn ?? 0.08, 2)}`);
+
+  setText('lbl-conf', conf >= 70 ? 'model stable' : 'warming up', 'text-accent-muted');
+  setText('sub-conf', `n = ${(data.datasetCount || 0) * (data.batchSize || 60) + (data.batchCount || 0)}`);
+
+  // sensor badges
+  const acs = document.getElementById('badge-acs712');
+  const ds = document.getElementById('badge-ds18b20');
+  if (acs) {
+    acs.textContent = 'Active';
+    acs.className = 'rounded bg-success-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success-muted';
+  }
+  if (ds) {
+    const ok = f.temp != null && f.temp > -100;
+    ds.textContent = ok ? 'Active' : 'Error';
+    ds.className = ok
+      ? 'rounded bg-success-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success-muted'
+      : 'rounded bg-danger-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-danger-muted';
+  }
+
+  updateOperatingPhase(data, f);
+
+  // live region card
+  regions[0].status = data.status === 'danger' ? 'danger' : data.status === 'caution' ? 'warn' : 'ok';
+  regions[0].maxCurrent = th.current?.critical ?? 16;
+  regions[0].maxTemp = th.temp?.critical ?? 70;
+  renderRegions();
+
+  // sparklines + open pages
+  initDashboardSparks();
+  const active = document.querySelector('.page.active')?.id;
+  if (active === 'page-monitoring') initMonitoringCharts(true);
+  if (active === 'page-statistics') refreshStatisticsFromLive();
+  if (active === 'page-bayesian') refreshBayesianFromLive(data);
+}
+
+function mean(arr) {
+  if (!arr.length) return 0;
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function varianceArr(arr) {
+  if (arr.length < 2) return 0;
+  const m = mean(arr);
+  return arr.reduce((s, v) => s + (v - m) ** 2, 0) / arr.length;
+}
+
+function refreshStatisticsFromLive() {
+  if (typeof Plotly === 'undefined' || liveSeries.current.length < 3) return;
+  const samples = liveSeries.current;
+  Plotly.react(
+    'chart-hist',
+    [{ x: samples, type: 'histogram', nbinsx: 20, marker: { color: 'rgba(59,130,246,0.75)' } }],
+    { ...plotlyLayoutBase, xaxis: { ...plotlyLayoutBase.xaxis, title: 'Current (A)' }, yaxis: { ...plotlyLayoutBase.yaxis, title: 'Count' } },
+    plotlyConfig
+  );
+  const m = mean(samples);
+  const sd = Math.sqrt(varianceArr(samples)) || 0.01;
+  const xs = [];
+  const ys = [];
+  for (let i = 0; i < 60; i++) {
+    const x = m - 3 * sd + (6 * sd * i) / 59;
+    xs.push(x);
+    ys.push(Math.exp(-0.5 * ((x - m) / sd) ** 2) / (sd * Math.sqrt(2 * Math.PI)));
+  }
+  Plotly.react(
+    'chart-gauss',
+    [{ x: xs, y: ys, type: 'scatter', mode: 'lines', fill: 'tozeroy', line: { color: '#60A5FA', width: 2 } }],
+    { ...plotlyLayoutBase, xaxis: { ...plotlyLayoutBase.xaxis, title: 'Current (A)' }, yaxis: { ...plotlyLayoutBase.yaxis, title: 'Density' } },
+    plotlyConfig
+  );
+  Plotly.react(
+    'chart-trend',
+    [
+      { x: liveSeries.t, y: liveSeries.current, name: 'I', type: 'scatter', mode: 'lines', line: { color: '#3B82F6' } },
+      { x: liveSeries.t, y: liveSeries.temp, name: 'T', type: 'scatter', mode: 'lines', yaxis: 'y2', line: { color: '#22C55E' } }
+    ],
+    {
+      ...plotlyLayoutBase,
+      showlegend: true,
+      yaxis: { ...plotlyLayoutBase.yaxis, title: 'A' },
+      yaxis2: { overlaying: 'y', side: 'right', title: '°C', gridcolor: 'transparent' },
+      xaxis: { ...plotlyLayoutBase.xaxis, type: 'date' }
+    },
+    plotlyConfig
+  );
+  chartsInitialized.statistics = true;
+
+  const sorted = [...samples].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median =
+    sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+
+  const setStat = (id, v, digits = 3) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = fmtNum(v, digits);
+  };
+  setStat('stat-mean', m, 2);
+  setStat('stat-median', median, 2);
+  setStat('stat-ma3i', liveSeries.ma3I.at(-1) || 0, 2);
+  setStat('stat-vari', liveSeries.varI.at(-1) || varianceArr(samples), 4);
+  setStat('stat-std', sd, 3);
+  setStat('stat-tslope', liveSeries.tempSlope.at(-1) || 0, 3);
+  setStat('stat-ma3t', liveSeries.ma3T.at(-1) || 0, 1);
+  setStat('stat-n', samples.length, 0);
+}
+
+function refreshBayesianFromLive(data) {
+  const gnb = data.gnb || {};
+  const post = Array.isArray(gnb.posteriors) ? gnb.posteriors : [];
+  const pOk = post[0] != null ? post[0] : Math.max(0, 1 - (data.riskPercent || 0) / 100);
+  const pWarn = post[1] != null ? post[1] : 0;
+  const pCrit = post[2] != null ? post[2] : Math.min(0.95, (data.riskPercent || 0) / 100);
+  const pHazard = Math.min(1, pWarn + pCrit);
+  const conf = gnb.confidence != null ? gnb.confidence : Math.min(0.99, (data.riskPercent || 0) / 100);
+
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  set('bayes-p-ok', pOk.toFixed(2));
+  set('bayes-p-hazard', pHazard.toFixed(2));
+  set('bayes-conf', `${(conf * 100).toFixed(0)}%`);
+  set(
+    'bayes-posteriors',
+    `ok ${pOk.toFixed(2)} · warn ${pWarn.toFixed(2)} · crit ${pCrit.toFixed(2)}`
+  );
+  set('bayes-train', `n = ${gnb.trainN ?? data.datasetCount ?? 0}`);
+  const counts = gnb.classCounts || [0, 0, 0];
+  set('bayes-counts', `counts [${counts.join(',')}]`);
+  set('bayes-score', `${gnb.score ?? 0} / 10`);
+  set('bayes-source', data.predictionSource || (gnb.active ? 'gnb' : 'rules'));
+  set('bayes-pipeline-status', gnb.status || 'Collecting labeled dataset…');
+
+  const barOk = document.getElementById('bayes-bar-ok');
+  const barHz = document.getElementById('bayes-bar-hazard');
+  if (barOk) barOk.style.width = `${(pOk * 100).toFixed(0)}%`;
+  if (barHz) barHz.style.width = `${(pHazard * 100).toFixed(0)}%`;
+  const gauge = document.getElementById('bayes-gauge');
+  if (gauge) gauge.style.setProperty('--pct', `${(conf * 100).toFixed(1)}%`);
+
+  const decision = document.getElementById('bayes-decision');
+  const decisionEq = document.getElementById('bayes-decision-eq');
+  const decisionCard = document.getElementById('bayes-decision-card');
+  let label = 'Standby (rules)';
+  let tone = 'border-surface-border';
+  let eq = 'waiting for sufficient labeled rows';
+  if (gnb.active) {
+    label =
+      gnb.predLabel === 'critical'
+        ? 'NB Critical'
+        : gnb.predLabel === 'warn'
+          ? 'NB Warning'
+          : 'NB OK';
+    tone =
+      gnb.predLabel === 'critical'
+        ? 'border-danger/40'
+        : gnb.predLabel === 'warn'
+          ? 'border-warning/40'
+          : 'border-success/40';
+    eq = `NB conf ${(conf * 100).toFixed(0)}% ≥ rule ${((gnb.ruleConfidence || 0) * 100).toFixed(0)}%`;
+  } else if (gnb.ready) {
+    label = 'NB ready · rules leading';
+    tone = 'border-accent/30';
+    eq = `NB conf ${(conf * 100).toFixed(0)}% below override gate`;
+  } else if (data.status === 'danger') {
+    label = 'Rules: Intervene';
+    tone = 'border-danger/40';
+  } else if (data.status === 'caution') {
+    label = 'Rules: Monitor';
+    tone = 'border-warning/40';
+  }
+  if (decision) {
+    decision.textContent = label;
+    decision.className =
+      'mt-1 text-xl font-semibold ' +
+      (tone.includes('danger')
+        ? 'text-danger-muted'
+        : tone.includes('warning')
+          ? 'text-warning-muted'
+          : tone.includes('success')
+            ? 'text-success-muted'
+            : 'text-ink-muted');
+  }
+  if (decisionEq) decisionEq.textContent = eq;
+  if (decisionCard) {
+    decisionCard.className = `glass rounded-xl p-4 border ${tone}`;
+  }
+
+  if (typeof Plotly !== 'undefined' && document.getElementById('chart-bayes')) {
+    const xs = liveSeries.t.length ? liveSeries.t : timeAxis(2);
+    const ys = liveSeries.risk.length
+      ? liveSeries.risk.map((r) => r / 100)
+      : [pHazard, pHazard];
+    Plotly.react(
+      'chart-bayes',
+      [
+        {
+          x: xs,
+          y: ys,
+          type: 'scatter',
+          mode: 'lines',
+          fill: 'tozeroy',
+          name: 'Hazard risk',
+          line: { color: '#EF4444', width: 2 }
+        }
+      ],
+      {
+        ...plotlyLayoutBase,
+        yaxis: { ...plotlyLayoutBase.yaxis, title: 'Risk / posterior', range: [0, 1] },
+        xaxis: { ...plotlyLayoutBase.xaxis, type: 'date' }
+      },
+      plotlyConfig
+    );
+    chartsInitialized.bayesian = true;
+  }
+}
+
+function thresholdsFromApi(thObj) {
+  const out = {};
+  PARAM_META.forEach((p) => {
+    const src = thObj?.[p.key];
+    out[p.key] = {
+      warn: src?.warn ?? DEFAULT_THRESHOLDS[p.key].warn,
+      critical: src?.critical ?? DEFAULT_THRESHOLDS[p.key].critical
+    };
+  });
+  return out;
+}
+
+function liveValuesFromFeatures(f) {
+  if (!f) return {};
+  return {
+    current: Math.abs(f.current),
+    temp: f.temp,
+    ma3I: Math.abs(f.ma3I),
+    ma3T: f.ma3T,
+    currentSlope: Math.abs(f.currentSlope),
+    tempSlope: Math.abs(f.tempSlope),
+    varI: f.varI,
+    power: f.power,
+    tempAcc: Math.abs(f.tempAcc)
+  };
+}
+
+function applyLiveAlerts(warnings) {
+  const mapped = (warnings || []).map((w, i) => ({
+    id: `live-${w.param}-${i}`,
+    state: 'current',
+    level: w.level === 'critical' ? 'red' : 'orange',
+    title: `${w.level === 'critical' ? 'Critical' : 'Warning'}: ${w.label}`,
+    reason: `Live value ${fmtNum(w.value)} vs threshold ${fmtNum(w.threshold)}`,
+    time: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    region: 'ESP32 Local Node',
+    sensor: 'ACS712+DS18B20',
+    action: 'Review circuit / reduce load',
+    severity: w.level === 'critical' ? 'critical' : 'warning'
+  }));
+
+  // promote previous current→past when cleared
+  const prevCurrent = alerts.filter((a) => a.state === 'current');
+  const past = alerts.filter((a) => a.state === 'past');
+  if (!mapped.length && prevCurrent.length) {
+    past.unshift(
+      ...prevCurrent.map((a) => ({ ...a, state: 'past', id: `past-${a.id}-${Date.now()}` }))
+    );
+  }
+
+  alerts.length = 0;
+  alerts.push(...mapped, ...past.slice(0, 30));
+  renderAlerts();
+
+  // history table — append only new breach keys
+  const seen = new Set(historyEvents.slice(0, 20).map((h) => h.event + h.time.slice(0, 16)));
+  mapped.forEach((a) => {
+    const key = a.title + a.time.slice(0, 16);
+    if (seen.has(key)) return;
+    historyEvents.unshift({
+      time: a.time,
+      event: a.title,
+      region: a.region,
+      sensor: a.sensor,
+      severity: a.severity,
+      value: a.reason.replace('Live value ', '')
+    });
+  });
+  if (historyEvents.length > 80) historyEvents.length = 80;
+  renderHistory();
+
+  const badge = document.getElementById('alert-badge');
+  if (badge) badge.textContent = String(mapped.length);
+
+  const setC = (id, n) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(n);
+  };
+  setC('alert-count-orange', mapped.filter((a) => a.level === 'orange').length);
+  setC('alert-count-red', mapped.filter((a) => a.level === 'red').length);
+  setC('alert-count-yellow', 0);
+  setC('alert-count-info', past.length);
+}
+
+async function pollLiveStatus() {
+  try {
+    const data = await api('/api/status');
+    liveState = data;
+    setAdaptiveToggle(data.mode === 'adaptive');
+    thresholdCache = thresholdsFromApi(data.thresholds);
+    updateKpis(data);
+    renderGnbBadge(data.gnb, data.predictionSource);
+    renderWarnings(data.warnings || [], { source: data.predictionSource });
+    renderParamStatus(data.paramStatus || []);
+    applyLiveAlerts(data.warnings || []);
+    renderThresholdEditor(thresholdCache, liveValuesFromFeatures(data.features));
+    const el = document.getElementById('last-update');
+    if (el) el.textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
+  } catch (_) {
+    if (!document.getElementById('threshold-editor-body')?.children.length) {
+      renderThresholdEditor(thresholdCache, {});
+    }
+  }
+}
+
+async function saveManualThresholds() {
+  setAdaptiveToggle(false);
+  const thresholds = readThresholdInputs();
+  thresholdCache = thresholds;
+  try {
+    await api('/api/thresholds', {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'manual', thresholds })
+    });
+    showToast('Manual thresholds saved to device');
+    pollLiveStatus();
+  } catch (_) {
+    localStorage.setItem('fbf_thresholds', JSON.stringify({ mode: 'manual', thresholds }));
+    showToast('Saved locally (device offline)');
+  }
+}
+
+async function applyAdaptive() {
+  setAdaptiveToggle(true);
+  try {
+    const data = await api('/api/adaptive', {
+      method: 'POST',
+      body: JSON.stringify({ enabled: true })
+    });
+    if (data.thresholds) thresholdCache = thresholdsFromApi(data.thresholds);
+    renderThresholdEditor(thresholdCache, liveValuesFromFeatures(liveState?.features));
+    showToast('Adaptive thresholds applied from dataset');
+    pollLiveStatus();
+  } catch (_) {
+    showToast('Adaptive needs ESP32 online (uses dataset averages)');
+  }
+}
+
+async function resetDefaults() {
+  try {
+    const data = await api('/api/defaults', { method: 'POST', body: '{}' });
+    if (data.thresholds) thresholdCache = thresholdsFromApi(data.thresholds);
+    else thresholdCache = { ...DEFAULT_THRESHOLDS };
+    setAdaptiveToggle(false);
+    renderThresholdEditor(thresholdCache, liveValuesFromFeatures(liveState?.features));
+    showToast('Defaults restored');
+    pollLiveStatus();
+  } catch (_) {
+    thresholdCache = JSON.parse(JSON.stringify(DEFAULT_THRESHOLDS));
+    setAdaptiveToggle(false);
+    renderThresholdEditor(thresholdCache, {});
+    showToast('Defaults restored locally');
+  }
+}
+
+function initPredictionUI() {
+  const toggle = document.getElementById('adaptive-toggle');
+  toggle?.addEventListener('click', () => {
+    const next = !toggle.classList.contains('on');
+    setAdaptiveToggle(next);
+    renderThresholdEditor(readThresholdInputs(), liveValuesFromFeatures(liveState?.features));
+    if (next) applyAdaptive();
+  });
+
+  document.getElementById('btn-save-thresholds')?.addEventListener('click', saveManualThresholds);
+  document.getElementById('btn-apply-adaptive')?.addEventListener('click', applyAdaptive);
+  document.getElementById('btn-reset-defaults')?.addEventListener('click', resetDefaults);
+
+  try {
+    const saved = JSON.parse(localStorage.getItem('fbf_thresholds') || 'null');
+    if (saved?.thresholds) {
+      thresholdCache = thresholdsFromApi(saved.thresholds);
+      setAdaptiveToggle(saved.mode === 'adaptive');
+    }
+  } catch (_) {}
+
+  renderThresholdEditor(thresholdCache, {});
+  pollLiveStatus();
+}
+
 /* Expose for inline handlers */
 window.navigateTo = navigateTo;
 window.openSidebar = openSidebar;
 window.closeSidebar = closeSidebar;
-window.openRegionModal = openRegionModal;
-window.closeRegionModal = closeRegionModal;
-window.editRegion = editRegion;
-window.deleteRegion = deleteRegion;
-window.saveRegion = saveRegion;
 window.refreshMonitoringCharts = refreshMonitoringCharts;
+
