@@ -143,7 +143,7 @@ Optional STA (home Wi‑Fi) can be set via `STA_SSID` / `STA_PASS` in `src/main.
 | Contributor       | GitHub / focus                                            | Highlights                                                                            |
 | ----------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | **Sayan Garai**   | [`sayan21m`](https://github.com/sayan21m) · `hardware-sg` | Project init, ESP32 firmware, SoftAP APIs, GNB, live UI, dataset persist, PR #1       |
-| **Soumili Hazra** | `software-sh`                                             | Initial HTML dashboard structure and frontend scaffolding; later merge / cleanup PRs  |
+| **Soumili Hazra** | [`soumili122004`](https://github.com/soumili122004) · `software-sh`                                             | Initial HTML dashboard structure and frontend scaffolding; later merge / cleanup PRs  |
 
 See [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md) for contribution stats and design notes.
 
