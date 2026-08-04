@@ -320,10 +320,15 @@
             </div>
 
             <div
+              id="online-pill"
               class="flex items-center gap-2 rounded-lg border border-success/30 bg-success-soft/40 px-2.5 py-1.5"
             >
-              <span class="status-dot status-ok animate-pulseLive"></span>
               <span
+                id="online-dot"
+                class="status-dot status-ok animate-pulseLive"
+              ></span>
+              <span
+                id="online-label"
                 class="hidden sm:inline text-[11px] font-medium text-success-muted"
                 >Online</span
               >
@@ -413,6 +418,12 @@
                   >
                 </div>
               </div>
+
+              <!-- Sensor / live faults -->
+              <div
+                id="sensor-fault-banner"
+                class="mb-4 hidden rounded-lg border border-danger/40 bg-danger-soft/50 px-3 py-2 text-sm text-danger-muted"
+              ></div>
 
               <!-- Live prediction warnings -->
               <div id="prediction-warnings" class="mb-4 hidden space-y-2"></div>
@@ -1310,7 +1321,7 @@
 
               <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div class="glass rounded-xl p-3 border-l-2 border-success">
-                  <p class="text-[10px] text-ink-dim">Info / Green</p>
+                  <p class="text-[10px] text-ink-dim">Past / Cleared</p>
                   <p
                     id="alert-count-info"
                     class="font-mono text-xl text-success-muted"
@@ -1319,7 +1330,7 @@
                   </p>
                 </div>
                 <div class="glass rounded-xl p-3 border-l-2 border-yellow-400">
-                  <p class="text-[10px] text-ink-dim">Yellow</p>
+                  <p class="text-[10px] text-ink-dim">Past Warns</p>
                   <p
                     id="alert-count-yellow"
                     class="font-mono text-xl text-yellow-400"
@@ -1328,7 +1339,7 @@
                   </p>
                 </div>
                 <div class="glass rounded-xl p-3 border-l-2 border-warning">
-                  <p class="text-[10px] text-ink-dim">Orange / Warn</p>
+                  <p class="text-[10px] text-ink-dim">Active Warn</p>
                   <p
                     id="alert-count-orange"
                     class="font-mono text-xl text-warning-muted"
@@ -1337,7 +1348,7 @@
                   </p>
                 </div>
                 <div class="glass rounded-xl p-3 border-l-2 border-danger">
-                  <p class="text-[10px] text-ink-dim">Red / Critical</p>
+                  <p class="text-[10px] text-ink-dim">Active Critical</p>
                   <p
                     id="alert-count-red"
                     class="font-mono text-xl text-danger-muted"
@@ -1351,7 +1362,7 @@
                 id="alerts-timeline"
                 class="relative space-y-0 pl-4 border-l border-surface-border ml-2"
               >
-                <!-- populated by JS -->
+                <div class="empty-state">No alerts yet — system nominal</div>
               </div>
             </section>
 
@@ -1362,30 +1373,36 @@
                   <p class="page-kicker">Event History</p>
                   <h2 class="page-title">Logged Events</h2>
                 </div>
-                <div class="flex flex-wrap gap-2">
+                <div class="flex flex-wrap gap-2 w-full sm:w-auto">
                   <button
+                    id="btn-export-csv"
+                    type="button"
                     class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
                   >
                     Export CSV
                   </button>
                   <button
+                    id="btn-export-json"
+                    type="button"
                     class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
                   >
                     Export JSON
                   </button>
                   <button
+                    id="btn-export-print"
+                    type="button"
                     class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
                   >
-                    Export PDF
+                    Print / PDF
                   </button>
                 </div>
               </div>
 
               <div class="glass rounded-2xl shadow-glass overflow-hidden">
                 <div
-                  class="flex flex-wrap gap-3 border-b border-surface-border p-4"
+                  class="history-filters flex flex-wrap gap-3 border-b border-surface-border p-4"
                 >
-                  <div class="relative flex-1 min-w-[180px]">
+                  <div class="relative flex-1 min-w-[160px]">
                     <svg
                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-dim"
                       fill="none"
@@ -1419,7 +1436,7 @@
                     id="history-region"
                     class="rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm text-ink-muted"
                   >
-                    <option value="all">All Regions</option>
+                    <option value="all">All Nodes</option>
                     <option value="ESP32 Local Node">ESP32 Local Node</option>
                   </select>
                   <select
@@ -1457,16 +1474,25 @@
                   </table>
                 </div>
                 <div
-                  class="flex items-center justify-between border-t border-surface-border px-4 py-3 text-xs text-ink-dim"
+                  class="history-pager flex items-center justify-between border-t border-surface-border px-4 py-3 text-xs text-ink-dim"
                 >
                   <span id="history-count">Showing 0 events</span>
                   <div class="flex gap-2">
                     <button
+                      id="history-prev"
+                      type="button"
                       class="rounded border border-surface-border px-2 py-1 hover:bg-surface-hover"
                     >
                       Prev
                     </button>
+                    <span
+                      id="history-page-label"
+                      class="inline-flex items-center font-mono text-ink-muted"
+                      >1 / 1</span
+                    >
                     <button
+                      id="history-next"
+                      type="button"
                       class="rounded border border-surface-border px-2 py-1 hover:bg-surface-hover"
                     >
                       Next
@@ -1596,10 +1622,20 @@
                     <div
                       class="flex justify-between gap-3 border-b border-surface-border pb-2"
                     >
+                      <span class="text-ink-dim">Dataset on flash</span>
+                      <span id="persist-status" class="font-mono text-ink"
+                        >—</span
+                      >
+                    </div>
+                    <div
+                      class="flex justify-between gap-3 border-b border-surface-border pb-2"
+                    >
                       <span class="text-ink-dim">SoftAP</span>
                       <span class="font-mono text-ink">FireBeforeFire</span>
                     </div>
-                    <div class="flex justify-between gap-3">
+                    <div
+                      class="flex justify-between gap-3 border-b border-surface-border pb-2"
+                    >
                       <span class="text-ink-dim">Dashboard</span>
                       <span class="font-mono text-ink">192.168.4.1</span>
                     </div>
@@ -1611,8 +1647,11 @@
                         </p>
                       </div>
                       <div
+                        id="auto-refresh-toggle"
                         class="toggle-track on"
-                        onclick="this.classList.toggle('on')"
+                        role="switch"
+                        aria-checked="true"
+                        title="Toggle live polling"
                       >
                         <div class="toggle-thumb"></div>
                       </div>

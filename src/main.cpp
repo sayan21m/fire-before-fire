@@ -24,6 +24,11 @@
 #define STA_SSID ""
 #define STA_PASS ""
 
+// Dataset persistence on LittleFS (survives power loss; wiped by uploadfs)
+#define DATASET_PATH "/dataset.bin"
+#define DATASET_MAGIC 0x46424644u  // 'FBFD'
+#define DATASET_VERSION 1
+
 // ── ACS712 ─────────────────────────────────────────────────────────
 #define ACS712_PIN 34
 #define SENSITIVITY_MV_PER_A 185.0f
@@ -57,6 +62,8 @@ const byte DNS_PORT = 53;
 #define EMA_TEMP_ALPHA       0.25f   // smooth DS18B20 before slopes
 
 float emaTempC = NAN;
+bool tempSensorOk = false;
+uint8_t tempDeviceCount = 0;
 
 struct Sample {
   float currentA;
@@ -94,6 +101,7 @@ bool hasBatchAvg = false;
 #define MAX_DATASET 100
 Features dataset[MAX_DATASET];
 int datasetCount = 0;
+bool datasetDirty = false;
 
 // ── Gaussian Naive Bayes pipeline ──────────────────────────────────
 // Features used for GNB (skip powerW — algebraically = 230*|I|)
@@ -663,6 +671,75 @@ float smoothTemp(float rawC) {
   return emaTempC;
 }
 
+bool saveDatasetToFs() {
+  if (!LittleFS.begin(false)) return false;
+  File f = LittleFS.open(DATASET_PATH, "w");
+  if (!f) {
+    Serial.println("[FS] dataset save open failed");
+    return false;
+  }
+  uint32_t magic = DATASET_MAGIC;
+  uint16_t ver = DATASET_VERSION;
+  uint16_t count = (uint16_t)datasetCount;
+  bool ok = f.write((uint8_t *)&magic, sizeof(magic)) == sizeof(magic)
+         && f.write((uint8_t *)&ver, sizeof(ver)) == sizeof(ver)
+         && f.write((uint8_t *)&count, sizeof(count)) == sizeof(count);
+  if (ok && count > 0) {
+    size_t bytes = (size_t)count * sizeof(Features);
+    ok = f.write((uint8_t *)dataset, bytes) == bytes;
+  }
+  f.close();
+  if (ok) {
+    datasetDirty = false;
+    Serial.printf("[FS] saved dataset (%d rows) → %s\n", datasetCount, DATASET_PATH);
+  } else {
+    Serial.println("[FS] dataset save write failed");
+  }
+  return ok;
+}
+
+bool loadDatasetFromFs() {
+  if (!LittleFS.exists(DATASET_PATH)) {
+    Serial.println("[FS] no persisted dataset yet");
+    return false;
+  }
+  File f = LittleFS.open(DATASET_PATH, "r");
+  if (!f) {
+    Serial.println("[FS] dataset load open failed");
+    return false;
+  }
+  uint32_t magic = 0;
+  uint16_t ver = 0;
+  uint16_t count = 0;
+  bool ok = f.read((uint8_t *)&magic, sizeof(magic)) == sizeof(magic)
+         && f.read((uint8_t *)&ver, sizeof(ver)) == sizeof(ver)
+         && f.read((uint8_t *)&count, sizeof(count)) == sizeof(count);
+  if (!ok || magic != DATASET_MAGIC || ver != DATASET_VERSION || count > MAX_DATASET) {
+    Serial.printf("[FS] dataset header invalid (magic=0x%08lx ver=%u count=%u)\n",
+                  (unsigned long)magic, ver, count);
+    f.close();
+    return false;
+  }
+  if (count > 0) {
+    size_t bytes = (size_t)count * sizeof(Features);
+    if (f.read((uint8_t *)dataset, bytes) != bytes) {
+      Serial.println("[FS] dataset body read failed");
+      f.close();
+      datasetCount = 0;
+      return false;
+    }
+  }
+  f.close();
+  datasetCount = count;
+  datasetDirty = false;
+  if (datasetCount > 0) {
+    lastBatchAvg = dataset[datasetCount - 1];
+    hasBatchAvg = true;
+  }
+  Serial.printf("[FS] loaded dataset (%d rows) from %s\n", datasetCount, DATASET_PATH);
+  return true;
+}
+
 void collapseBatchToAverage() {
   Features avg = {};
   for (int i = 0; i < batchCount; i++) {
@@ -693,6 +770,9 @@ void collapseBatchToAverage() {
     for (int i = 1; i < MAX_DATASET; i++) dataset[i - 1] = dataset[i];
     dataset[MAX_DATASET - 1] = avg;
   }
+
+  datasetDirty = true;
+  saveDatasetToFs();
 
   if (adaptiveMode) applyAdaptiveThresholds();
 
@@ -749,6 +829,17 @@ void handleStatus() {
     doc["lastTarget"] = (int)lastBatchAvg.target;
     doc["lastTargetLabel"] = targetName(lastBatchAvg.target);
   }
+
+  JsonObject sens = doc["sensors"].to<JsonObject>();
+  sens["tempOk"] = tempSensorOk;
+  sens["tempDevices"] = tempDeviceCount;
+  sens["currentOk"] = true;
+
+  JsonObject persist = doc["persist"].to<JsonObject>();
+  persist["path"] = DATASET_PATH;
+  persist["saved"] = LittleFS.exists(DATASET_PATH);
+  persist["dirty"] = datasetDirty;
+  persist["count"] = datasetCount;
 
   JsonObject gnb = doc["gnb"].to<JsonObject>();
   gnb["sufficient"] = gnbSufficient;
@@ -1028,6 +1119,10 @@ void setupWeb() {
       Serial.printf("  %s  (%u bytes)\n", file.name(), (unsigned)file.size());
       file = root.openNextFile();
     }
+    if (loadDatasetFromFs()) {
+      fitGaussianNB();
+      if (adaptiveMode) applyAdaptiveThresholds();
+    }
   }
 
   server.on("/api/status", HTTP_GET, handleStatus);
@@ -1091,12 +1186,26 @@ void setup() {
 
   sensors.begin();
   sensors.setResolution(12);
+  tempDeviceCount = sensors.getDeviceCount();
+  Serial.printf("DS18B20 devices found: %u\n", (unsigned)tempDeviceCount);
+  if (tempDeviceCount == 0) {
+    Serial.println("WARNING: no DS18B20 on GPIO 4 — dashboard will show sensor fault");
+  }
   calibrateZero();
 
   Serial.println("Fire Before Fire — ready (false-alarm hardened)");
   Serial.println("Connect Wi‑Fi: FireBeforeFire / firebefore123");
   Serial.println("Open: http://192.168.4.1");
   Serial.println("# I  T  MA3I MA3T dI/dt dT/dt Var P d2T  risk%");
+}
+
+void serveClientsFor(unsigned long ms) {
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    dnsServer.processNextRequest();
+    server.handleClient();
+    delay(2);
+  }
 }
 
 void loop() {
@@ -1107,10 +1216,24 @@ void loop() {
   if (fabsf(currentA) < DEADBAND_CURRENT) currentA = 0.0f;
 
   float tempRaw = readTemperatureC();
-  if (tempRaw == DEVICE_DISCONNECTED_C) {
-    delay(50);
-    dnsServer.processNextRequest();
-    server.handleClient();
+  // DS18B20 returns -127 °C when the bus/device is missing
+  tempSensorOk = (tempRaw != DEVICE_DISCONNECTED_C);
+  tempDeviceCount = sensors.getDeviceCount();
+
+  if (!tempSensorOk) {
+    // Keep current live so the UI is not stuck at all-zeros from boot Features{}
+    latest.currentA = currentA;
+    latest.powerW = LINE_VOLTAGE_V * fabsf(currentA);
+    latest.currentSlope = nz(slope(false));
+    latest.varI = nz(variance(false));
+    latest.ma3I = nz(ma3(false));
+    static unsigned long lastTempWarn = 0;
+    if (millis() - lastTempWarn > 5000) {
+      lastTempWarn = millis();
+      Serial.printf("[SENSOR] DS18B20 fault (raw=%.2f, devices=%u) — check GPIO 4 wiring\n",
+                    tempRaw, (unsigned)tempDeviceCount);
+    }
+    serveClientsFor(200);
     return;
   }
   float tempC = smoothTemp(tempRaw);
@@ -1165,10 +1288,5 @@ void loop() {
                   WiFi.softAPgetStationNum(), AP_SSID);
   }
 
-  unsigned long start = millis();
-  while (millis() - start < (unsigned long)(LOOP_DT_S * 1000)) {
-    dnsServer.processNextRequest();
-    server.handleClient();
-    delay(2);
-  }
+  serveClientsFor((unsigned long)(LOOP_DT_S * 1000));
 }

@@ -30,6 +30,7 @@ P \approx 230\,\mathrm{V} \times |I|
 - Live KPIs, sparklines, monitoring charts, alerts, event history
 - Nine-parameter threshold table (manual + adaptive, never below factory defaults)
 - Batch averaging (60 samples) → labeled `dataset[]` with target `0|1|2`
+- **Persists dataset** on LittleFS across power cycles
 - Gaussian NB fit when sufficiency score ≥ 6; overrides rules when confidence is high enough
 - Offline-capable UI (bundled Tailwind CSS; Plotly loads only if the client has internet)
 
@@ -40,16 +41,25 @@ P \approx 230\,\mathrm{V} \times |I|
 ```
 fire_before_fire/
 ├── platformio.ini          # ESP32 + LittleFS + libs
-├── src/main.cpp            # Sensors, prediction, SoftAP, APIs
+├── src/main.cpp            # Sensors, prediction, SoftAP, dataset persist
 ├── data/                   # Files uploaded to LittleFS
 │   ├── index.html
 │   ├── scripts.js
 │   └── app.css
 ├── src-css/input.css       # Tailwind source
 ├── tailwind.config.js
-├── docs/PROJECT_REPORT.md  # Full project report
+├── docs/PROJECT_REPORT.md
 └── README.md
 ```
+
+---
+
+## Dataset persistence
+
+Labeled `dataset[]` rows are written to LittleFS as `/dataset.bin` after every batch collapse and reloaded on boot (GNB refits from the saved rows).
+
+- Survives power loss and **firmware-only** uploads (`pio run -t upload`)
+- **Wiped** by `pio run -t uploadfs` (full filesystem rewrite)
 
 ---
 

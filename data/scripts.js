@@ -268,8 +268,27 @@ function makeLineChart(id, y, color, yTitle, threshold) {
   Plotly.newPlot(id, traces, layout, plotlyConfig);
 }
 
+function markChartOffline(ids) {
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.offlineMsg) return;
+    el.dataset.offlineMsg = "1";
+    el.innerHTML =
+      '<div class="chart-empty">Charts load when Plotly CDN is available (needs internet once). Dashboard sparklines work offline.</div>';
+  });
+}
+
 function initMonitoringCharts(force = false) {
-  if (typeof Plotly === "undefined") return;
+  if (typeof Plotly === "undefined") {
+    markChartOffline([
+      "chart-current",
+      "chart-temp",
+      "chart-power",
+      "chart-cslope",
+      "chart-tslope",
+    ]);
+    return;
+  }
   const n = Math.max(liveSeries.current.length, 2);
   const cur = liveSeries.current.length ? liveSeries.current : [0, 0];
   const tmp = liveSeries.temp.length ? liveSeries.temp : [0, 0];
@@ -554,6 +573,11 @@ function renderAlerts() {
     (a) => alertFilter === "all" || a.state === alertFilter,
   );
   const el = document.getElementById("alerts-timeline");
+  if (!el) return;
+  if (!list.length) {
+    el.innerHTML = `<div class="empty-state">No alerts in this filter — system nominal</div>`;
+    return;
+  }
   el.innerHTML = list
     .map(
       (a) => `
@@ -569,18 +593,18 @@ function renderAlerts() {
       }"></span>
       <article class="glass rounded-xl border-l-4 ${severityBorder(a.level)} p-4 ${a.state === "current" && a.level === "red" ? "shadow-glow-danger" : ""}">
         <div class="flex flex-wrap items-start justify-between gap-2">
-          <div>
+          <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
               <h4 class="text-sm font-semibold text-ink">${a.title}</h4>
               <span class="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${severityColor(a.level)}">${a.level}</span>
               <span class="rounded bg-surface-raised px-1.5 py-0.5 text-[9px] uppercase text-ink-dim">${a.state}</span>
             </div>
-            <p class="mt-1 text-xs text-ink-muted">${a.reason}</p>
+            <p class="mt-1 text-xs text-ink-muted break-words">${a.reason}</p>
           </div>
-          <time class="font-mono text-[11px] text-ink-dim">${a.time}</time>
+          <time class="font-mono text-[11px] text-ink-dim shrink-0">${a.time}</time>
         </div>
         <div class="mt-3 flex flex-wrap gap-3 text-[11px] text-ink-dim">
-          <span>Region: <span class="text-ink-muted">${a.region}</span></span>
+          <span>Node: <span class="text-ink-muted">${a.region}</span></span>
           <span>Sensor: <span class="font-mono text-ink-muted">${a.sensor}</span></span>
           <span>Level: <span class="text-ink-muted capitalize">${a.severity}</span></span>
         </div>
@@ -597,13 +621,16 @@ function severityBadge(sev) {
   return "bg-success-soft text-success-muted";
 }
 
-function renderHistory() {
+const HISTORY_PAGE_SIZE = 10;
+let historyPage = 0;
+
+function filteredHistoryRows() {
   const q = (
-    document.getElementById("history-search").value || ""
+    document.getElementById("history-search")?.value || ""
   ).toLowerCase();
-  const sev = document.getElementById("history-severity").value;
-  const region = document.getElementById("history-region").value;
-  const sort = document.getElementById("history-sort").value;
+  const sev = document.getElementById("history-severity")?.value || "all";
+  const region = document.getElementById("history-region")?.value || "all";
+  const sort = document.getElementById("history-sort")?.value || "newest";
 
   let rows = historyEvents.filter((e) => {
     const matchQ =
@@ -624,10 +651,23 @@ function renderHistory() {
     }
     return b.time.localeCompare(a.time);
   });
+  return rows;
+}
 
-  document.getElementById("history-tbody").innerHTML = rows
-    .map(
-      (e) => `
+function renderHistory() {
+  const tbody = document.getElementById("history-tbody");
+  if (!tbody) return;
+  const rows = filteredHistoryRows();
+  const pages = Math.max(1, Math.ceil(rows.length / HISTORY_PAGE_SIZE) || 1);
+  if (historyPage >= pages) historyPage = pages - 1;
+  if (historyPage < 0) historyPage = 0;
+  const start = historyPage * HISTORY_PAGE_SIZE;
+  const pageRows = rows.slice(start, start + HISTORY_PAGE_SIZE);
+
+  tbody.innerHTML = pageRows.length
+    ? pageRows
+        .map(
+          (e) => `
     <tr>
       <td class="px-4 py-3 font-mono text-xs whitespace-nowrap">${e.time}</td>
       <td class="px-4 py-3 text-ink">${e.event}</td>
@@ -638,27 +678,208 @@ function renderHistory() {
       </td>
       <td class="px-4 py-3 font-mono text-xs">${e.value}</td>
     </tr>`,
-    )
-    .join("");
+        )
+        .join("")
+    : `<tr><td colspan="6" class="px-4 py-8 text-center text-ink-dim">No logged events yet</td></tr>`;
 
-  document.getElementById("history-count").textContent =
-    `Showing ${rows.length} events`;
+  const countEl = document.getElementById("history-count");
+  if (countEl) {
+    countEl.textContent = rows.length
+      ? `Showing ${start + 1}–${Math.min(start + pageRows.length, rows.length)} of ${rows.length}`
+      : "Showing 0 events";
+  }
+  const pageLabel = document.getElementById("history-page-label");
+  if (pageLabel) pageLabel.textContent = `${historyPage + 1} / ${pages}`;
+  const prev = document.getElementById("history-prev");
+  const next = document.getElementById("history-next");
+  if (prev) prev.disabled = historyPage <= 0;
+  if (next) next.disabled = historyPage >= pages - 1 || rows.length === 0;
 }
 
-/* -------------------- Theme button (visual only) -------------------- */
+function downloadBlob(filename, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportHistoryCsv() {
+  const rows = filteredHistoryRows();
+  const header = ["time", "event", "region", "sensor", "severity", "value"];
+  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const body = rows
+    .map((e) =>
+      [e.time, e.event, e.region, e.sensor, e.severity, e.value]
+        .map(esc)
+        .join(","),
+    )
+    .join("\n");
+  downloadBlob(
+    `fbf-history-${Date.now()}.csv`,
+    `${header.join(",")}\n${body}\n`,
+    "text/csv;charset=utf-8",
+  );
+  showToast(`Exported ${rows.length} events (CSV)`);
+}
+
+async function exportHistoryJson() {
+  let dataset = null;
+  try {
+    dataset = await api("/api/dataset");
+  } catch (_) {}
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    node: "ESP32 Local Node",
+    live: liveState
+      ? {
+          status: liveState.status,
+          riskPercent: liveState.riskPercent,
+          predictionSource: liveState.predictionSource,
+          features: liveState.features,
+          gnb: liveState.gnb,
+        }
+      : null,
+    history: filteredHistoryRows(),
+    dataset,
+  };
+  downloadBlob(
+    `fbf-export-${Date.now()}.json`,
+    JSON.stringify(payload, null, 2),
+    "application/json",
+  );
+  showToast("Exported JSON (history + dataset)");
+}
+
+function exportHistoryPrint() {
+  const rows = filteredHistoryRows();
+  const win = window.open("", "_blank");
+  if (!win) {
+    showToast("Pop-up blocked — allow pop-ups to print");
+    return;
+  }
+  const tr = rows
+    .map(
+      (e) =>
+        `<tr><td>${e.time}</td><td>${e.event}</td><td>${e.region}</td><td>${e.sensor}</td><td>${e.severity}</td><td>${e.value}</td></tr>`,
+    )
+    .join("");
+  win.document
+    .write(`<!doctype html><html><head><title>Fire Before Fire — Events</title>
+    <style>body{font-family:system-ui,sans-serif;padding:24px;color:#111}
+    table{border-collapse:collapse;width:100%;font-size:12px}
+    th,td{border:1px solid #ccc;padding:6px 8px;text-align:left}
+    th{background:#f1f5f9}</style></head><body>
+    <h1>Fire Before Fire — Event Log</h1>
+    <p>${new Date().toLocaleString()} · ${rows.length} events</p>
+    <table><thead><tr><th>Time</th><th>Event</th><th>Node</th><th>Sensor</th><th>Severity</th><th>Value</th></tr></thead>
+    <tbody>${tr || '<tr><td colspan="6">No events</td></tr>'}</tbody></table>
+    <script>window.onload=()=>window.print()<\/script></body></html>`);
+  win.document.close();
+}
+
+function setConnectionStatus(ok) {
+  const pill = document.getElementById("online-pill");
+  const dot = document.getElementById("online-dot");
+  const label = document.getElementById("online-label");
+  if (dot) {
+    dot.className = `status-dot ${ok ? "status-ok animate-pulseLive" : "status-danger"}`;
+  }
+  if (label) {
+    label.textContent = ok ? "Online" : "Offline";
+    label.className = `hidden sm:inline text-[11px] font-medium ${ok ? "text-success-muted" : "text-danger-muted"}`;
+  }
+  if (pill) {
+    pill.className = ok
+      ? "flex items-center gap-2 rounded-lg border border-success/30 bg-success-soft/40 px-2.5 py-1.5"
+      : "flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-soft/40 px-2.5 py-1.5";
+  }
+}
+
+let pollTimer = null;
+let autoRefreshEnabled = true;
+
+function startPolling() {
+  stopPolling();
+  pollLiveStatus();
+  pollTimer = setInterval(pollLiveStatus, 2000);
+  autoRefreshEnabled = true;
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  autoRefreshEnabled = false;
+}
+
 function bindThemeButton() {
-  document.getElementById("theme-btn")?.addEventListener("click", () => {
-    showToast("Dark industrial theme active (placeholder)");
+  const btn = document.getElementById("theme-btn");
+  if (!btn) return;
+  const apply = (light) => {
+    document.documentElement.classList.toggle("theme-light", light);
+    localStorage.setItem("fbf_theme", light ? "light" : "dark");
+    showToast(light ? "Light theme" : "Dark theme");
+  };
+  if (localStorage.getItem("fbf_theme") === "light") {
+    document.documentElement.classList.add("theme-light");
+  }
+  btn.addEventListener("click", () => {
+    apply(!document.documentElement.classList.contains("theme-light"));
   });
 }
 
-/* -------------------- Live placeholder tick -------------------- */
-function tickLive() {
-  const el = document.getElementById("last-update");
-  if (el) {
-    const d = new Date();
-    el.textContent = d.toLocaleTimeString("en-GB", { hour12: false });
-  }
+function bindHistoryControls() {
+  [
+    "history-search",
+    "history-severity",
+    "history-region",
+    "history-sort",
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const resetPage = () => {
+      historyPage = 0;
+      renderHistory();
+    };
+    el.addEventListener("input", resetPage);
+    el.addEventListener("change", resetPage);
+  });
+  document.getElementById("history-prev")?.addEventListener("click", () => {
+    historyPage -= 1;
+    renderHistory();
+  });
+  document.getElementById("history-next")?.addEventListener("click", () => {
+    historyPage += 1;
+    renderHistory();
+  });
+  document
+    .getElementById("btn-export-csv")
+    ?.addEventListener("click", exportHistoryCsv);
+  document
+    .getElementById("btn-export-json")
+    ?.addEventListener("click", exportHistoryJson);
+  document
+    .getElementById("btn-export-print")
+    ?.addEventListener("click", exportHistoryPrint);
+}
+
+function bindAutoRefreshToggle() {
+  const t = document.getElementById("auto-refresh-toggle");
+  if (!t) return;
+  t.addEventListener("click", () => {
+    const on = !t.classList.contains("on");
+    t.classList.toggle("on", on);
+    t.setAttribute("aria-checked", on ? "true" : "false");
+    if (on) {
+      startPolling();
+      showToast("Live polling on (2s)");
+    } else {
+      stopPolling();
+      showToast("Live polling paused");
+    }
+  });
 }
 
 /* -------------------- Init -------------------- */
@@ -680,37 +901,26 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  [
-    "history-search",
-    "history-severity",
-    "history-region",
-    "history-sort",
-  ].forEach((id) => {
-    document.getElementById(id)?.addEventListener("input", renderHistory);
-    document.getElementById(id)?.addEventListener("change", renderHistory);
-  });
-
   document
     .getElementById("monitor-window")
     ?.addEventListener("change", refreshMonitoringCharts);
 
   bindThemeButton();
+  bindHistoryControls();
+  bindAutoRefreshToggle();
   updateClock();
   setInterval(updateClock, 1000);
-  setInterval(tickLive, 2000);
 
   renderRegions();
   renderAlerts();
   renderHistory();
-  // live values come from /api/status — skip placeholder counter animation
-
   setTimeout(initDashboardSparks, 80);
 
-  // Soft loading skeleton flash on first paint (optional polish)
-  document.getElementById("last-update").textContent = "just now";
+  const lu = document.getElementById("last-update");
+  if (lu) lu.textContent = "just now";
 
   initPredictionUI();
-  setInterval(pollLiveStatus, 2000);
+  startPolling();
 
   window.addEventListener("resize", () => {
     const active = document.querySelector(".page.active")?.id;
@@ -1091,14 +1301,49 @@ function updateOperatingPhase(data, f) {
   );
 }
 
+function updatePersistUi(data) {
+  const p = data.persist || {};
+  const persist = document.getElementById("persist-status");
+  if (persist) {
+    persist.textContent = p.saved
+      ? `${data.datasetCount || 0} rows on flash`
+      : `${data.datasetCount || 0} rows (not saved yet)`;
+  }
+}
+
+function updateSensorFaultBanner(data) {
+  const el = document.getElementById("sensor-fault-banner");
+  if (!el) return;
+  const s = data.sensors || {};
+  const f = data.features || {};
+  const tempMissing =
+    s.tempOk === false ||
+    (typeof f.temp === "number" && f.temp === 0 && (data.batchCount || 0) === 0);
+  if (tempMissing) {
+    const n = s.tempDevices != null ? ` (${s.tempDevices} device(s) on bus)` : "";
+    el.textContent = `DS18B20 not reading${n} — check GPIO 4 wiring/pull-up. Current can still update; temp/risk stay at 0 until the sensor responds.`;
+    el.classList.remove("hidden");
+  } else {
+    el.classList.add("hidden");
+    el.textContent = "";
+  }
+}
+
 function updateKpis(data) {
   const f = data.features || {};
   const th = data.thresholds || {};
   const conf = pushLiveSample(data);
+  updateSensorFaultBanner(data);
+  updatePersistUi(data);
 
   const set = (id, v, digits) => {
     const el = document.getElementById(id);
-    if (el && v != null && !Number.isNaN(v)) el.textContent = fmtNum(v, digits);
+    if (!el) return;
+    if (v == null || Number.isNaN(v)) {
+      el.textContent = "—";
+      return;
+    }
+    el.textContent = fmtNum(v, digits);
   };
   set("kpi-current", f.current, 2);
   set("kpi-temp", f.temp, 1);
@@ -1578,7 +1823,10 @@ function applyLiveAlerts(warnings) {
   };
   setC("alert-count-orange", mapped.filter((a) => a.level === "orange").length);
   setC("alert-count-red", mapped.filter((a) => a.level === "red").length);
-  setC("alert-count-yellow", 0);
+  setC(
+    "alert-count-yellow",
+    past.filter((a) => a.level === "orange" || a.severity === "warning").length,
+  );
   setC("alert-count-info", past.length);
 }
 
@@ -1586,9 +1834,11 @@ async function pollLiveStatus() {
   try {
     const data = await api("/api/status");
     liveState = data;
+    setConnectionStatus(true);
     setAdaptiveToggle(data.mode === "adaptive");
     thresholdCache = thresholdsFromApi(data.thresholds);
     updateKpis(data);
+    renderRegions();
     renderGnbBadge(data.gnb, data.predictionSource);
     renderWarnings(data.warnings || [], { source: data.predictionSource });
     renderParamStatus(data.paramStatus || []);
@@ -1603,6 +1853,13 @@ async function pollLiveStatus() {
         hour12: false,
       });
   } catch (_) {
+    setConnectionStatus(false);
+    const banner = document.getElementById("sensor-fault-banner");
+    if (banner) {
+      banner.textContent =
+        "ESP32 offline — join Wi‑Fi FireBeforeFire / firebefore123, then open http://192.168.4.1";
+      banner.classList.remove("hidden");
+    }
     if (!document.getElementById("threshold-editor-body")?.children.length) {
       renderThresholdEditor(thresholdCache, {});
     }
