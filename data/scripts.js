@@ -2416,20 +2416,23 @@ async function showPhoneNotification(title, body, opts = {}) {
     url: "/",
   };
   const reg = swReg || (await navigator.serviceWorker.getRegistration());
-  if (reg && reg.active) {
-    reg.active.postMessage(payload);
-    return true;
+  if (reg) {
+    try {
+      const ready = reg.active ? reg : await navigator.serviceWorker.ready;
+      await (ready.showNotification
+        ? ready.showNotification(title, {
+            body,
+            tag: payload.tag,
+            icon: "/icon-192.png",
+            requireInteraction: !!opts.requireInteraction,
+            data: { url: "/" },
+          })
+        : Promise.reject(new Error("no showNotification")));
+      return true;
+    } catch (_) {}
   }
-  try {
-    new Notification(title, {
-      body,
-      tag: payload.tag,
-      icon: "/icon-192.png",
-    });
-    return true;
-  } catch (_) {
-    return false;
-  }
+  // Do not call `new Notification()` — illegal in Android Chrome / some PWAs.
+  return false;
 }
 
 function deliverAlert(title, body, level, tag) {

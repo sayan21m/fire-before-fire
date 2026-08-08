@@ -4,8 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0B1220" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Fire Before Fire — OS notifications</title>
     <link rel="manifest" href="/notify-manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <style>
       :root {
         color-scheme: dark;
@@ -65,29 +68,44 @@
         border: 1px solid #334155;
         color: var(--ink);
       }
-      #status { margin-top: 1rem; font-size: .85rem; color: var(--muted); }
+      #status { margin-top: 1rem; font-size: .85rem; color: var(--muted); white-space: pre-wrap; }
       #status.ok { color: var(--ok); }
       #status.bad { color: var(--bad); }
       .note { font-size: .78rem; color: var(--muted); margin-top: 1rem; }
+      .tips {
+        font-size: .78rem;
+        color: var(--muted);
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: .75rem;
+        padding: .75rem .85rem;
+        margin: 0 0 1rem;
+        line-height: 1.45;
+      }
+      .tips strong { color: var(--ink); }
     </style>
   </head>
   <body>
     <main class="card">
       <h1>Enable OS notifications</h1>
       <p>
-        This page is served over <strong>HTTPS</strong>, so your phone can grant
-        real system notifications. SoftAP
-        <code>http://192.168.4.1</code> cannot — browsers block that.
+        Use this <strong>HTTPS</strong> page (not SoftAP). Cloud already has push enabled —
+        if Allow works but you see nothing, check the tips below.
       </p>
+      <div class="tips" id="tips">
+        <strong>iPhone:</strong> Share → Add to Home Screen, open the app icon, then Allow.<br />
+        Web Push in Safari only works from the installed Home Screen app (iOS 16.4+).<br /><br />
+        <strong>Android:</strong> Chrome → Allow. Turn off Focus / Do Not Disturb for the test.<br /><br />
+        Device ID must match ESP Settings (default <code>esp32-01</code>).
+      </div>
       <label for="deviceId">Device ID (must match ESP Settings)</label>
       <input id="deviceId" value="esp32-01" autocomplete="off" />
       <button id="btn-enable" type="button">Allow OS notifications</button>
       <button id="btn-test" class="secondary" type="button">Send test notification</button>
       <div id="status">Waiting…</div>
       <p class="note">
-        Keep this subscription after enabling. When the ESP detects a hazard and
-        is on home Wi‑Fi, it tells the cloud, which pushes an OS notification to
-        every subscribed phone.
+        Test uses the cloud only. Real hazards need the ESP on home Wi‑Fi (Serial:
+        <code>[PUSH] OS notify HTTP 200</code>).
       </p>
     </main>
     <script>
@@ -95,6 +113,13 @@
       const deviceInput = document.getElementById("deviceId");
       const statusEl = document.getElementById("status");
       if (params.get("device")) deviceInput.value = params.get("device");
+
+      const isIos =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      const isStandalone =
+        window.matchMedia("(display-mode: standalone)").matches ||
+        window.navigator.standalone === true;
 
       function setStatus(msg, ok) {
         statusEl.textContent = msg;
@@ -119,17 +144,28 @@
 
       async function ensureSw() {
         if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-          throw new Error("This browser does not support Web Push");
+          throw new Error(
+            isIos && !isStandalone
+              ? "On iPhone: Add to Home Screen, open that icon, then try again"
+              : "This browser does not support Web Push",
+          );
         }
         return navigator.serviceWorker.register("/notify-sw.js", { scope: "/" });
       }
 
       async function enable() {
         try {
+          if (isIos && !isStandalone) {
+            setStatus(
+              "iPhone: Share → Add to Home Screen, open the app icon, then tap Allow again",
+              false,
+            );
+            return;
+          }
           setStatus("Requesting permission…");
           const perm = await Notification.requestPermission();
           if (perm !== "granted") {
-            setStatus("Permission denied in browser settings", false);
+            setStatus("Permission denied — check browser / iOS Settings → Notifications", false);
             return;
           }
           const reg = await ensureSw();
@@ -154,11 +190,25 @@
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || "subscribe failed");
           localStorage.setItem("fbf_os_notify", "1");
-          setStatus("OS notifications enabled for " + (deviceInput.value || "esp32-01"), true);
-          new Notification("Fire Before Fire", {
-            body: "OS notifications are on for this phone",
-            icon: "/icon-192.png",
-          });
+          // Android Chrome / installed PWAs forbid `new Notification()` —
+          // must use the service worker registration.
+          try {
+            const ready = await navigator.serviceWorker.ready;
+            await ready.showNotification("Fire Before Fire", {
+              body: "Subscribed — tap Send test notification next",
+              icon: "/icon-192.png",
+              badge: "/icon-192.png",
+              tag: "fbf-local",
+            });
+          } catch (notifyErr) {
+            console.warn("local showNotification failed", notifyErr);
+          }
+          setStatus(
+            "Subscribed for " +
+              (deviceInput.value || "esp32-01") +
+              ".\nNow tap Send test notification.",
+            true,
+          );
         } catch (e) {
           setStatus(String(e.message || e), false);
         }
@@ -166,6 +216,7 @@
 
       async function testPush() {
         try {
+          setStatus("Sending push via Render…");
           const res = await fetch("/api/push/test", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -173,7 +224,19 @@
           });
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || "test failed");
-          setStatus("Test sent to " + data.sent + " subscriber(s)", true);
+          if (!data.sent) {
+            setStatus(
+              "Cloud OK but sent=0 — tap Allow first (or device ID mismatch)",
+              false,
+            );
+            return;
+          }
+          setStatus(
+            "Cloud accepted push (sent=" +
+              data.sent +
+              ").\nIf nothing appears: Focus mode off, Chrome/Safari notifications on, iPhone must use Home Screen app.",
+            true,
+          );
         } catch (e) {
           setStatus(String(e.message || e), false);
         }
@@ -181,12 +244,17 @@
 
       document.getElementById("btn-enable").addEventListener("click", enable);
       document.getElementById("btn-test").addEventListener("click", testPush);
-      setStatus(
-        window.isSecureContext
-          ? "Ready — tap Allow OS notifications"
-          : "Needs HTTPS (open the Render URL, not SoftAP)",
-        window.isSecureContext,
-      );
+
+      if (!window.isSecureContext) {
+        setStatus("Needs HTTPS (open the Render URL, not SoftAP)", false);
+      } else if (isIos && !isStandalone) {
+        setStatus(
+          "iPhone detected — Add to Home Screen first, then open that icon",
+          false,
+        );
+      } else {
+        setStatus("Ready — tap Allow OS notifications", true);
+      }
     </script>
   </body>
 </html>

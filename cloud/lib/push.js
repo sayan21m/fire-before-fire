@@ -87,7 +87,8 @@ function createPushStore(opts = {}) {
             keys: sub.keys,
           },
           body,
-          { TTL: 60, urgency: level === "critical" ? "high" : "normal" },
+          // Longer TTL: phones often wake slowly; 60s dropped many deliveries.
+          { TTL: 3600, urgency: level === "critical" ? "high" : "high" },
         );
         sent++;
       } catch (e) {
