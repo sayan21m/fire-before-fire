@@ -827,6 +827,7 @@ async function exportDatasetJson() {
 async function importGnbFromCloud() {
   const btn = document.getElementById("btn-import-gnb-cloud");
   if (btn) btn.disabled = true;
+  showToast("Uploading dataset + importing GNB…");
   try {
     const data = await api("/api/cloud/import-gnb", {
       method: "POST",
@@ -839,11 +840,8 @@ async function importGnbFromCloud() {
     );
     pollLiveStatus();
   } catch (e) {
-    const msg =
-      e?.message?.includes("HTTP")
-        ? "Import failed — need STA Wi‑Fi + uploaded dataset on Render"
-        : "Import failed — ESP offline or cloud not configured";
-    showToast(msg);
+    const hint = e.data && e.data.hint ? ` — ${e.data.hint}` : "";
+    showToast((e.message || "Import failed — need Wi‑Fi + dataset") + hint);
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -968,6 +966,10 @@ function bindHistoryControls() {
   document
     .getElementById("btn-import-gnb-cloud")
     ?.addEventListener("click", importGnbFromCloud);
+  document
+    .getElementById("btn-save-cloud-cfg")
+    ?.addEventListener("click", saveCloudConfigForm);
+  loadCloudConfigForm();
 }
 
 function bindAutoRefreshToggle() {
@@ -1176,8 +1178,19 @@ async function api(path, opts) {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (_) {}
+  if (!res.ok) {
+    const msg =
+      (data && (data.error || data.message)) || `HTTP ${res.status}`;
+    const err = new Error(msg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
 }
 
 function renderThresholdEditor(thresholds, liveValues) {
@@ -1417,12 +1430,100 @@ function updatePersistUi(data) {
   const c = data.cloud || {};
   const cloudEl = document.getElementById("cloud-status");
   if (cloudEl) {
-    if (!c.configured) cloudEl.textContent = "off";
+    if (!c.configured) cloudEl.textContent = "need home Wi‑Fi";
     else if (c.done) cloudEl.textContent = c.status || "uploaded";
     else if (c.pending) cloudEl.textContent = c.status || "queued";
     else
       cloudEl.textContent =
         c.status || `${data.datasetCount || 0}/100 then upload`;
+  }
+  const hint = document.getElementById("cfg-cloud-hint");
+  if (hint && c.url) {
+    hint.textContent = c.staConnected
+      ? `STA online · ${c.staSsid || "wifi"} → ${String(c.url).replace(/^https?:\/\//, "")}`
+      : `URL ${String(c.url).replace(/^https?:\/\//, "")} · STA ${c.staSsid ? "saved, connecting…" : "not set"}`;
+  }
+}
+
+async function loadCloudConfigForm() {
+  try {
+    const cfg = await api("/api/cloud/config");
+    const ssid = document.getElementById("cfg-sta-ssid");
+    const pass = document.getElementById("cfg-sta-pass");
+    const url = document.getElementById("cfg-cloud-url");
+    const key = document.getElementById("cfg-cloud-key");
+    const id = document.getElementById("cfg-device-id");
+    if (ssid) ssid.value = cfg.staSsid || "";
+    if (pass) pass.value = "";
+    if (pass) pass.placeholder = cfg.staPassSet ? "•••••••• (unchanged)" : "Password";
+    if (url)
+      url.value =
+        cfg.cloudBaseUrl ||
+        cfg.defaults?.cloudBaseUrl ||
+        "https://fire-before-fire.onrender.com";
+    if (key) key.value = cfg.cloudApiKey || "";
+    if (id) id.value = cfg.deviceId || cfg.defaults?.deviceId || "esp32-01";
+    const hint = document.getElementById("cfg-cloud-hint");
+    if (hint) {
+      hint.textContent = cfg.staConnected
+        ? `STA online ${cfg.staIp || ""}`
+        : cfg.configured
+          ? "Saved — waiting for STA"
+          : "Enter home Wi‑Fi to enable cloud";
+    }
+  } catch (_) {}
+}
+
+async function saveCloudConfigForm() {
+  const body = {
+    staSsid: document.getElementById("cfg-sta-ssid")?.value?.trim() || "",
+    staPass: document.getElementById("cfg-sta-pass")?.value || "",
+    cloudBaseUrl: (
+      document.getElementById("cfg-cloud-url")?.value?.trim() ||
+      "https://fire-before-fire.onrender.com"
+    ).replace(/\/$/, ""),
+    cloudApiKey: document.getElementById("cfg-cloud-key")?.value?.trim() || "",
+    deviceId:
+      document.getElementById("cfg-device-id")?.value?.trim() || "esp32-01",
+  };
+  if (!body.staSsid) {
+    showToast("Enter home Wi‑Fi SSID");
+    return;
+  }
+  if (!body.cloudApiKey) {
+    showToast("Enter cloud API key");
+    return;
+  }
+  const btn = document.getElementById("btn-save-cloud-cfg");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+  }
+  try {
+    const res = await api("/api/cloud/config", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (res.staConnected) {
+      showToast(`Connected · ${res.staIp || "STA OK"}`);
+    } else if (res.ok) {
+      showToast(
+        "Saved — Wi‑Fi still connecting (check SSID/password; SoftAP stays up)",
+      );
+    } else {
+      showToast(res.error || "Save failed");
+    }
+    const pass = document.getElementById("cfg-sta-pass");
+    if (pass) pass.value = "";
+    loadCloudConfigForm();
+    pollLiveStatus();
+  } catch (e) {
+    showToast(e.message || "Could not save cloud config");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Save & connect";
+    }
   }
 }
 

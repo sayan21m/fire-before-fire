@@ -19,6 +19,11 @@
 node_modules/
 package-lock.json
 
+# Secrets / local env
+.env
+.env.local
+cloud/.env
+
 # Cloud ingest local storage
 cloud/data/
 cloud/node_modules/

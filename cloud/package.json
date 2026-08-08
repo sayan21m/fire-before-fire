@@ -4,13 +4,17 @@
   "description": "Ingest full ESP32 datasets (100 rows) for Fire Before Fire",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "train": "node train.js",
+    "train:reset": "node train.js --reset"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2"
   }
 }

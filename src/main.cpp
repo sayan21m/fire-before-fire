@@ -21,17 +21,18 @@
 #define AP_SSID "FireBeforeFire"
 #define AP_PASS "firebefore123"
 
-// Home Wi‑Fi (STA) — required for Render upload when dataset hits 100 rows.
-// SoftAP dashboard still works locally. Leave blank to disable cloud upload.
-#define STA_SSID ""
-#define STA_PASS ""
-
-// Render ingest (upload only when dataset reaches MAX_DATASET rows).
-// Example: "https://your-service.onrender.com"
-#define CLOUD_BASE_URL ""
-#define CLOUD_API_KEY "change-me-fbf-key"
-#define DEVICE_ID "esp32-01"
+// Cloud / home Wi‑Fi defaults (overridable from Settings page → /cloud_cfg.json)
+#define DEFAULT_CLOUD_BASE_URL "https://fire-before-fire.onrender.com"
+#define DEFAULT_CLOUD_API_KEY "12firebeforefire24"
+#define DEFAULT_DEVICE_ID "esp32-01"
+#define CLOUD_CFG_PATH "/cloud_cfg.json"
 #define CLOUD_RETRY_MS 120000UL  // retry failed upload every 2 min while pending
+
+char staSsid[64] = "";
+char staPass[64] = "";
+char cloudBaseUrl[128] = DEFAULT_CLOUD_BASE_URL;
+char cloudApiKey[64] = DEFAULT_CLOUD_API_KEY;
+char deviceId[32] = DEFAULT_DEVICE_ID;
 
 // Dataset persistence on LittleFS (survives power loss; wiped by uploadfs)
 #define DATASET_PATH "/dataset.bin"
@@ -761,7 +762,7 @@ bool loadDatasetFromFs() {
   }
   Serial.printf("[FS] loaded dataset (%d rows) from %s\n", datasetCount, DATASET_PATH);
   // If flash already has a full dataset, queue one Render upload when STA is online
-  if (datasetCount >= MAX_DATASET && strlen(CLOUD_BASE_URL) > 0) {
+  if (datasetCount >= MAX_DATASET && strlen(cloudBaseUrl) > 0) {
     cloudUploadPending = true;
     cloudUploadDone = false;
     snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "queued (full on boot)");
@@ -770,16 +771,170 @@ bool loadDatasetFromFs() {
 }
 
 bool cloudConfigured() {
-  return strlen(CLOUD_BASE_URL) > 0 && strlen(STA_SSID) > 0;
+  return strlen(cloudBaseUrl) > 0 && strlen(staSsid) > 0 && strlen(cloudApiKey) > 0;
 }
 
-bool tryUploadFullDatasetToCloud() {
+bool saveCloudConfigToFs() {
+  JsonDocument doc;
+  doc["staSsid"] = staSsid;
+  doc["staPass"] = staPass;
+  doc["cloudBaseUrl"] = cloudBaseUrl;
+  doc["cloudApiKey"] = cloudApiKey;
+  doc["deviceId"] = deviceId;
+  File f = LittleFS.open(CLOUD_CFG_PATH, "w");
+  if (!f) return false;
+  bool ok = serializeJson(doc, f) > 0;
+  f.close();
+  return ok;
+}
+
+bool loadCloudConfigFromFs() {
+  if (!LittleFS.exists(CLOUD_CFG_PATH)) return false;
+  File f = LittleFS.open(CLOUD_CFG_PATH, "r");
+  if (!f) return false;
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) return false;
+  if (doc["staSsid"].is<const char *>())
+    strncpy(staSsid, doc["staSsid"] | "", sizeof(staSsid) - 1);
+  if (doc["staPass"].is<const char *>())
+    strncpy(staPass, doc["staPass"] | "", sizeof(staPass) - 1);
+  if (doc["cloudBaseUrl"].is<const char *>())
+    strncpy(cloudBaseUrl, doc["cloudBaseUrl"] | DEFAULT_CLOUD_BASE_URL, sizeof(cloudBaseUrl) - 1);
+  if (doc["cloudApiKey"].is<const char *>())
+    strncpy(cloudApiKey, doc["cloudApiKey"] | DEFAULT_CLOUD_API_KEY, sizeof(cloudApiKey) - 1);
+  if (doc["deviceId"].is<const char *>())
+    strncpy(deviceId, doc["deviceId"] | DEFAULT_DEVICE_ID, sizeof(deviceId) - 1);
+  staSsid[sizeof(staSsid) - 1] = 0;
+  staPass[sizeof(staPass) - 1] = 0;
+  cloudBaseUrl[sizeof(cloudBaseUrl) - 1] = 0;
+  cloudApiKey[sizeof(cloudApiKey) - 1] = 0;
+  deviceId[sizeof(deviceId) - 1] = 0;
+  Serial.printf("[CFG] loaded cloud cfg url=%s sta=%s device=%s\n",
+                cloudBaseUrl, staSsid[0] ? staSsid : "(none)", deviceId);
+  return true;
+}
+
+void connectStaIfConfigured() {
+  if (strlen(staSsid) == 0) return;
+  WiFi.disconnect(false);
+  delay(50);
+  WiFi.begin(staSsid, staPass);
+  Serial.printf("[STA] begin %s (non-blocking)\n", staSsid);
+}
+
+// Wait briefly for STA — keep short so SoftAP HTTP handlers stay responsive
+bool waitStaConnected(unsigned long maxMs = 4000) {
+  unsigned long start = millis();
+  while (millis() - start < maxMs) {
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.printf("[STA] OK %s\n", WiFi.localIP().toString().c_str());
+      return true;
+    }
+    delay(100);
+  }
+  Serial.println("[STA] not connected yet (will keep trying in background)");
+  return WiFi.status() == WL_CONNECTED;
+}
+
+void handleGetCloudConfig() {
+  JsonDocument doc;
+  doc["staSsid"] = staSsid;
+  doc["staPassSet"] = strlen(staPass) > 0;
+  doc["cloudBaseUrl"] = cloudBaseUrl;
+  doc["cloudApiKeySet"] = strlen(cloudApiKey) > 0;
+  doc["cloudApiKey"] = cloudApiKey;
+  doc["deviceId"] = deviceId;
+  doc["staConnected"] = WiFi.status() == WL_CONNECTED;
+  doc["staIp"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
+  doc["staStatus"] = (int)WiFi.status();
+  doc["configured"] = cloudConfigured();
+  JsonObject defs = doc["defaults"].to<JsonObject>();
+  defs["cloudBaseUrl"] = DEFAULT_CLOUD_BASE_URL;
+  defs["deviceId"] = DEFAULT_DEVICE_ID;
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void copyJsonStr(JsonVariantConst v, char *dst, size_t dstLen) {
+  if (v.isNull() || dstLen == 0) return;
+  const char *s = v.as<const char *>();
+  if (!s) return;
+  strncpy(dst, s, dstLen - 1);
+  dst[dstLen - 1] = 0;
+}
+
+void handlePostCloudConfig() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json",
+                "{\"ok\":false,\"error\":\"missing body — use JSON POST\"}");
+    return;
+  }
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
+    return;
+  }
+
+  if (!doc["staSsid"].isNull()) copyJsonStr(doc["staSsid"], staSsid, sizeof(staSsid));
+  // Only update password if a non-empty value is sent
+  if (!doc["staPass"].isNull()) {
+    const char *p = doc["staPass"].as<const char *>();
+    if (p && p[0]) copyJsonStr(doc["staPass"], staPass, sizeof(staPass));
+  }
+  if (!doc["cloudBaseUrl"].isNull()) {
+    copyJsonStr(doc["cloudBaseUrl"], cloudBaseUrl, sizeof(cloudBaseUrl));
+    if (cloudBaseUrl[0] == 0)
+      strncpy(cloudBaseUrl, DEFAULT_CLOUD_BASE_URL, sizeof(cloudBaseUrl) - 1);
+  }
+  if (!doc["cloudApiKey"].isNull()) {
+    const char *k = doc["cloudApiKey"].as<const char *>();
+    if (k && k[0]) copyJsonStr(doc["cloudApiKey"], cloudApiKey, sizeof(cloudApiKey));
+  }
+  if (!doc["deviceId"].isNull()) {
+    copyJsonStr(doc["deviceId"], deviceId, sizeof(deviceId));
+    if (deviceId[0] == 0)
+      strncpy(deviceId, DEFAULT_DEVICE_ID, sizeof(deviceId) - 1);
+  }
+
+  // strip trailing slash on URL
+  size_t n = strlen(cloudBaseUrl);
+  while (n > 0 && cloudBaseUrl[n - 1] == '/') {
+    cloudBaseUrl[--n] = 0;
+  }
+
+  bool saved = saveCloudConfigToFs();
+  connectStaIfConfigured();
+  bool staOk = waitStaConnected(3500);
+
+  JsonDocument ok;
+  ok["ok"] = saved;
+  ok["configured"] = cloudConfigured();
+  ok["staConnected"] = staOk || WiFi.status() == WL_CONNECTED;
+  ok["staIp"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
+  ok["staSsid"] = staSsid;
+  ok["cloudBaseUrl"] = cloudBaseUrl;
+  ok["deviceId"] = deviceId;
+  ok["error"] = saved ? nullptr : "could not write /cloud_cfg.json";
+  String out;
+  serializeJson(ok, out);
+  server.send(saved ? 200 : 500, "application/json", out);
+}
+
+bool tryUploadFullDatasetToCloud(bool force = false) {
   if (!cloudConfigured()) {
     snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "disabled (set STA+URL)");
     return false;
   }
-  if (datasetCount < MAX_DATASET) {
+  if (!force && datasetCount < MAX_DATASET) {
     snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "waiting (%d/%d)", datasetCount, MAX_DATASET);
+    return false;
+  }
+  if (force && datasetCount < 1) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "no local rows to upload");
     return false;
   }
   if (WiFi.status() != WL_CONNECTED) {
@@ -791,10 +946,10 @@ bool tryUploadFullDatasetToCloud() {
   snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "uploading…");
 
   JsonDocument doc;
-  doc["deviceId"] = DEVICE_ID;
+  doc["deviceId"] = deviceId;
   doc["datasetCount"] = datasetCount;
   doc["datasetMax"] = MAX_DATASET;
-  doc["full"] = true;
+  doc["full"] = datasetCount >= MAX_DATASET;
   doc["firmware"] = "fire-before-fire";
   JsonArray rows = doc["rows"].to<JsonArray>();
   for (int i = 0; i < datasetCount; i++) {
@@ -806,8 +961,8 @@ bool tryUploadFullDatasetToCloud() {
   String body;
   serializeJson(doc, body);
 
-  String url = String(CLOUD_BASE_URL) + "/api/ingest";
-  bool useTls = strncmp(CLOUD_BASE_URL, "https://", 8) == 0;
+  String url = String(cloudBaseUrl) + "/api/ingest";
+  bool useTls = strncmp(cloudBaseUrl, "https://", 8) == 0;
   HTTPClient http;
   WiFiClientSecure secure;
   int code = -1;
@@ -830,8 +985,8 @@ bool tryUploadFullDatasetToCloud() {
 
   http.setTimeout(12000);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("Authorization", String("Bearer ") + CLOUD_API_KEY);
-  http.addHeader("X-Device-Id", DEVICE_ID);
+  http.addHeader("Authorization", String("Bearer ") + cloudApiKey);
+  http.addHeader("X-Device-Id", deviceId);
   code = http.POST(body);
   cloudLastHttp = code;
   String resp = http.getString();
@@ -945,8 +1100,8 @@ bool tryImportGnbFromCloud() {
     return false;
   }
 
-  String url = String(CLOUD_BASE_URL) + "/api/devices/" + DEVICE_ID + "/model";
-  bool useTls = strncmp(CLOUD_BASE_URL, "https://", 8) == 0;
+  String url = String(cloudBaseUrl) + "/api/devices/" + deviceId + "/model";
+  bool useTls = strncmp(cloudBaseUrl, "https://", 8) == 0;
   HTTPClient http;
   WiFiClientSecure secure;
   snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "importing GNB…");
@@ -966,15 +1121,20 @@ bool tryImportGnbFromCloud() {
   }
 
   http.setTimeout(12000);
-  http.addHeader("Authorization", String("Bearer ") + CLOUD_API_KEY);
-  http.addHeader("X-Device-Id", DEVICE_ID);
+  http.addHeader("Authorization", String("Bearer ") + cloudApiKey);
+  http.addHeader("X-Device-Id", deviceId);
   int code = http.GET();
   cloudLastHttp = code;
   String body = http.getString();
   http.end();
 
   if (code < 200 || code >= 300) {
-    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import fail HTTP %d", code);
+    if (code == 404) {
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg),
+               "import fail 404 — no cloud model for %s yet", deviceId);
+    } else {
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import fail HTTP %d", code);
+    }
     Serial.printf("[CLOUD] model GET fail %d %s\n", code, body.c_str());
     return false;
   }
@@ -997,7 +1157,7 @@ bool tryImportGnbFromCloud() {
 void handleImportGnb() {
   if (!cloudConfigured()) {
     server.send(400, "application/json",
-                "{\"ok\":false,\"error\":\"set STA_SSID and CLOUD_BASE_URL in firmware\"}");
+                "{\"ok\":false,\"error\":\"set home Wi-Fi + cloud URL in Settings\"}");
     return;
   }
   if (WiFi.status() != WL_CONNECTED) {
@@ -1005,11 +1165,29 @@ void handleImportGnb() {
                 "{\"ok\":false,\"error\":\"STA Wi-Fi not connected — join home network on ESP\"}");
     return;
   }
+  // Render free disk is ephemeral — push local rows first so GET /model can succeed.
+  if (datasetCount > 0) {
+    Serial.printf("[CLOUD] import: uploading %d local rows first\n", datasetCount);
+    if (!tryUploadFullDatasetToCloud(true)) {
+      JsonDocument err;
+      err["ok"] = false;
+      err["error"] = cloudStatusMsg;
+      err["http"] = cloudLastHttp;
+      err["hint"] = "upload before import failed";
+      String out;
+      serializeJson(err, out);
+      server.send(502, "application/json", out);
+      return;
+    }
+  }
   if (!tryImportGnbFromCloud()) {
     JsonDocument err;
     err["ok"] = false;
     err["error"] = cloudStatusMsg;
     err["http"] = cloudLastHttp;
+    if (cloudLastHttp == 404 && datasetCount < 1) {
+      err["hint"] = "collect dataset rows on device, then Import again";
+    }
     String out;
     serializeJson(err, out);
     server.send(502, "application/json", out);
@@ -1145,8 +1323,9 @@ void handleStatus() {
   cloud["pending"] = cloudUploadPending;
   cloud["done"] = cloudUploadDone;
   cloud["staConnected"] = WiFi.status() == WL_CONNECTED;
-  cloud["deviceId"] = DEVICE_ID;
-  cloud["url"] = CLOUD_BASE_URL;
+  cloud["deviceId"] = deviceId;
+  cloud["url"] = cloudBaseUrl;
+  cloud["staSsid"] = staSsid;
   cloud["lastHttp"] = cloudLastHttp;
   cloud["status"] = cloudStatusMsg;
   cloud["trigger"] = "full_100";
@@ -1377,13 +1556,16 @@ void handleCaptive() {
 }
 
 void setupWeb() {
-  // SoftAP-only when no home Wi‑Fi is configured (AP+STA with empty STA is flaky)
-  if (strlen(STA_SSID) > 0) {
-    WiFi.mode(WIFI_AP_STA);
+  // Mount FS early so Settings-saved STA/cloud config is available before Wi‑Fi
+  if (!LittleFS.begin(false)) {
+    Serial.println("LittleFS mount FAILED — upload filesystem: pio run -t uploadfs");
   } else {
-    WiFi.mode(WIFI_AP);
+    Serial.println("LittleFS mounted.");
+    loadCloudConfigFromFs();
   }
 
+  // Always AP+STA so SoftAP stays up while home Wi‑Fi can be added from Settings
+  WiFi.mode(WIFI_AP_STA);
   WiFi.setSleep(false);
   delay(100);
 
@@ -1392,7 +1574,6 @@ void setupWeb() {
   IPAddress subnet(255, 255, 255, 0);
   WiFi.softAPConfig(apIP, gateway, subnet);
 
-  // channel 6, visible SSID, max 4 clients
   bool apOk = WiFi.softAP(AP_SSID, AP_PASS, 6, 0, 4);
   delay(300);
 
@@ -1402,33 +1583,15 @@ void setupWeb() {
   Serial.printf("  SSID    : %s\n", AP_SSID);
   Serial.printf("  Password: %s\n", AP_PASS);
   Serial.printf("  Open    : http://%s\n", WiFi.softAPIP().toString().c_str());
-  Serial.println("  1) Join Wi‑Fi 'FireBeforeFire'");
-  Serial.println("  2) Ignore 'no internet' warning");
-  Serial.println("  3) Open http://192.168.4.1");
+  Serial.println("  Cloud   : set home Wi‑Fi in Settings page");
+  Serial.printf("  Default : %s\n", cloudBaseUrl);
   Serial.println("========================================");
 
-  if (strlen(STA_SSID) > 0) {
-    WiFi.begin(STA_SSID, STA_PASS);
-    Serial.printf("Connecting STA to %s", STA_SSID);
-    for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
-      delay(250);
-      Serial.print('.');
-    }
-    Serial.println();
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.printf("STA OK  also open http://%s\n", WiFi.localIP().toString().c_str());
-    } else {
-      Serial.println("STA failed — SoftAP still available");
-    }
-  }
+  connectStaIfConfigured();
 
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
-  // Do NOT format on fail — that would wipe uploadfs data
-  if (!LittleFS.begin(false)) {
-    Serial.println("LittleFS mount FAILED — upload filesystem: pio run -t uploadfs");
-  } else {
-    Serial.println("LittleFS mounted. Files:");
+  if (LittleFS.begin(false)) {
     File root = LittleFS.open("/");
     File file = root.openNextFile();
     while (file) {
@@ -1439,7 +1602,6 @@ void setupWeb() {
       fitGaussianNB();
       if (adaptiveMode) applyAdaptiveThresholds();
     }
-    // Imported cloud model (if saved) overrides local fit
     if (loadGnbModelFromFs()) {
       Serial.println("[GNB] restored imported cloud model from flash");
     }
@@ -1447,15 +1609,17 @@ void setupWeb() {
 
   if (cloudConfigured()) {
     Serial.printf("Cloud: upload@%d rows + import GNB ← %s (%s)\n",
-                  MAX_DATASET, CLOUD_BASE_URL, DEVICE_ID);
+                  MAX_DATASET, cloudBaseUrl, deviceId);
   } else {
-    Serial.println("Cloud: disabled (set STA_SSID + CLOUD_BASE_URL to enable)");
+    Serial.println("Cloud: waiting for home Wi‑Fi in Settings (URL pre-set)");
   }
 
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/dataset", HTTP_GET, handleDataset);
   server.on("/api/gnb", HTTP_GET, handleGnb);
   server.on("/api/cloud/import-gnb", HTTP_POST, handleImportGnb);
+  server.on("/api/cloud/config", HTTP_GET, handleGetCloudConfig);
+  server.on("/api/cloud/config", HTTP_POST, handlePostCloudConfig);
   server.on("/api/thresholds", HTTP_GET, handleGetThresholds);
   server.on("/api/thresholds", HTTP_POST, handlePostThresholds);
   server.on("/api/adaptive", HTTP_POST, handleAdaptive);

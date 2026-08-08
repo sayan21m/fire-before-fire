@@ -1128,9 +1128,9 @@
                       id="btn-import-gnb-cloud"
                       type="button"
                       class="rounded-lg border border-accent/40 bg-accent-soft px-3 py-1.5 text-xs text-accent-muted hover:bg-accent/20 transition"
-                      title="Download GNB params from Render (needs STA Wi‑Fi)"
+                      title="Upload local dataset to Render, then download fitted GNB (needs STA Wi‑Fi)"
                     >
-                      Import GNB from cloud
+                      Upload & import GNB
                     </button>
                     <button
                       id="btn-export-dataset-csv"
@@ -1698,6 +1698,95 @@
                         <div class="toggle-thumb"></div>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                <!-- Cloud / home Wi‑Fi (set on device; URL defaults to Render) -->
+                <div class="glass rounded-2xl p-5 shadow-glass xl:col-span-2">
+                  <h3
+                    class="text-sm font-semibold text-ink mb-1 flex items-center gap-2"
+                  >
+                    <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                    Home Wi‑Fi &amp; Cloud
+                  </h3>
+                  <p class="text-xs text-ink-dim mb-4">
+                    SoftAP stays local. Enter home Wi‑Fi so the ESP can reach
+                    <a
+                      class="text-accent-muted underline"
+                      href="https://fire-before-fire.onrender.com"
+                      target="_blank"
+                      rel="noopener"
+                      >fire-before-fire.onrender.com</a
+                    >
+                    when the dataset hits 100 rows.
+                  </p>
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label class="block">
+                      <span class="text-xs text-ink-dim">Home Wi‑Fi SSID</span>
+                      <input
+                        id="cfg-sta-ssid"
+                        type="text"
+                        autocomplete="off"
+                        placeholder="Your router name"
+                        class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink"
+                      />
+                    </label>
+                    <label class="block">
+                      <span class="text-xs text-ink-dim"
+                        >Home Wi‑Fi password</span
+                      >
+                      <input
+                        id="cfg-sta-pass"
+                        type="password"
+                        autocomplete="new-password"
+                        placeholder="Leave blank to keep saved"
+                        class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink"
+                      />
+                    </label>
+                    <label class="block sm:col-span-2">
+                      <span class="text-xs text-ink-dim">Cloud URL</span>
+                      <input
+                        id="cfg-cloud-url"
+                        type="url"
+                        value="https://fire-before-fire.onrender.com"
+                        class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink"
+                      />
+                    </label>
+                    <label class="block">
+                      <span class="text-xs text-ink-dim">Cloud API key</span>
+                      <input
+                        id="cfg-cloud-key"
+                        type="text"
+                        autocomplete="off"
+                        class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink"
+                      />
+                    </label>
+                    <label class="block">
+                      <span class="text-xs text-ink-dim">Device ID</span>
+                      <input
+                        id="cfg-device-id"
+                        type="text"
+                        value="esp32-01"
+                        class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink"
+                      />
+                    </label>
+                  </div>
+                  <div
+                    class="mt-4 flex flex-wrap items-center justify-between gap-2"
+                  >
+                    <p
+                      id="cfg-cloud-hint"
+                      class="text-[11px] text-ink-dim font-mono"
+                    >
+                      —
+                    </p>
+                    <button
+                      id="btn-save-cloud-cfg"
+                      type="button"
+                      class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-muted transition"
+                    >
+                      Save &amp; connect
+                    </button>
                   </div>
                 </div>
 

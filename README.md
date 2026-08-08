@@ -49,12 +49,17 @@ At idle with no load, **current ≈ 0 A** (and power/risk near zero) is expected
 fire_before_fire/
 ├── platformio.ini          # ESP32 + LittleFS + libs
 ├── src/main.cpp            # Sensors, prediction, SoftAP, dataset persist
-├── data/                   # Files uploaded to LittleFS
+├── data/                   # SoftAP UI (LittleFS)
 │   ├── index.html
 │   ├── scripts.js
 │   └── app.css
+├── dataset/                # Offline labeled CSVs (source)
+├── cloud/
+│   ├── server.js           # Render API: ingest → corpus → refit GNB
+│   ├── train.js            # CLI: npm run train / train:reset
+│   ├── seed/dataset_1.csv  # Boot seed for cloud GNB
+│   └── lib/                # gnb.js + pipeline.js
 ├── src-css/input.css       # Tailwind source
-├── tailwind.config.js
 ├── docs/PROJECT_REPORT.md
 └── README.md
 ```
@@ -73,34 +78,43 @@ Labeled `dataset[]` rows (max 100) are written to LittleFS as `/dataset.bin` aft
 
 ---
 
-## Cloud upload (Render) — only at 100 rows
+## Cloud upload (Render) — seed CSV + device retrain
 
-The ESP does **not** stream every row. When `datasetCount` first hits **100**, it POSTs the full snapshot to your Render service (retries every 2 min until success). SoftAP still works; **home Wi‑Fi (STA)** is required for the upload.
+Default host: [https://fire-before-fire.onrender.com](https://fire-before-fire.onrender.com)
 
-1. Deploy `cloud/` on Render (Web Service, root `cloud`, `npm start`). Set env `CLOUD_API_KEY`.
-2. In `src/main.cpp`:
+**Training pipeline**
 
-```cpp
-#define STA_SSID "YourHomeWifi"
-#define STA_PASS "password"
-#define CLOUD_BASE_URL "https://YOUR-SERVICE.onrender.com"
-#define CLOUD_API_KEY "same-as-render-env"
-#define DEVICE_ID "esp32-01"
+1. On boot, the cloud service seeds a corpus from `cloud/seed/*.csv` (includes `dataset_1.csv`) and fits a global Gaussian NB.
+2. When the ESP dataset hits **100 rows**, it POSTs to `/api/ingest` — rows are **appended** to the corpus and the model is **refit**.
+3. SoftAP **Upload & import GNB** pulls `GET /api/devices/:id/model` (latest corpus model).
+
+Local train / reset:
+
+```bash
+cd cloud
+npm run train              # seed + fit
+npm run train:reset        # wipe corpus, re-seed, fit
+npm run train -- --csv ../dataset/dataset_1.csv
 ```
 
-3. Flash firmware. After a full upload, open **Gaussian NB** → **Import GNB from cloud** (ESP must be on home Wi‑Fi). The model is saved on the device and reused after reboot.
+SoftAP still works offline; **home Wi‑Fi** is configured on **Settings** (saved to `/cloud_cfg.json`).
 
-Local test: `cd cloud && npm install && CLOUD_API_KEY=change-me-fbf-key npm start`
+1. Flash firmware + UI (`upload` / `uploadfs`)
+2. SoftAP dashboard → **Settings** → **Home Wi‑Fi & Cloud**
+3. Enter router SSID/password (cloud URL + API key are pre-filled)
+4. **Save & connect** — then auto-upload / **Upload & import GNB** can reach Render
+
+Render env `CLOUD_API_KEY` must match the device key (same as `cloud/.env`).
 
 | Method | Path | Auth | Description |
 | ------ | ---- | ---- | ----------- |
-| POST | `/api/ingest` | Bearer | Full dataset → fit + store GNB |
-| GET | `/api/devices/:id/model` | Bearer | Download GNB params (ESP import) |
-| POST | `/api/devices/:id/model/refit` | Bearer | Refit from last snapshot |
-| GET | `/api/devices` | Bearer | List devices |
+| POST | `/api/ingest` | Bearer | Append device rows → refit GNB |
+| GET | `/api/devices/:id/model` | Bearer | Download latest GNB (ESP import) |
+| GET | `/api/train/status` | Bearer | Corpus / seed / fit stats |
+| POST | `/api/train/refit` | Bearer | Force refit on current corpus |
+| GET/POST | `/api/cloud/config` | SoftAP | Read/save STA + cloud settings |
+| POST | `/api/cloud/import-gnb` | SoftAP | Upload local rows + pull model |
 | GET | `/health` | — | Liveness |
-
-On the ESP SoftAP: `POST /api/cloud/import-gnb` pulls that model.
 
 ---
 
