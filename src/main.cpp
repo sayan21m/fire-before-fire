@@ -17,14 +17,15 @@
 #include <math.h>
 #include <string.h>
 #include <WebSocketsServer.h>
+#include "certs.h"
 
 // ── WiFi SoftAP (phone/laptop → FireBeforeFire → http://192.168.4.1) ──
 #define AP_SSID "FireBeforeFire"
-#define AP_PASS "firebefore123"
+// SoftAP password is derived per-chip (not a shared hardcoded secret).
+char apPass[17] = "";
 
-// Cloud / home Wi‑Fi defaults (overridable from Settings page → /cloud_cfg.json)
+// Cloud / home Wi‑Fi defaults (API key must be set in Settings — never ship a shared secret)
 #define DEFAULT_CLOUD_BASE_URL "https://fire-before-fire.onrender.com"
-#define DEFAULT_CLOUD_API_KEY "12firebeforefire24"
 #define DEFAULT_DEVICE_ID "esp32-01"
 #define CLOUD_CFG_PATH "/cloud_cfg.json"
 #define CLOUD_RETRY_MS 60000UL           // retry failed upload every 1 min
@@ -34,7 +35,7 @@
 char staSsid[64] = "";
 char staPass[64] = "";
 char cloudBaseUrl[128] = DEFAULT_CLOUD_BASE_URL;
-char cloudApiKey[64] = DEFAULT_CLOUD_API_KEY;
+char cloudApiKey[64] = "";  // empty until Settings /cloud_cfg.json
 char deviceId[32] = DEFAULT_DEVICE_ID;
 
 // Sensors under this device (editable in Settings — locate where events happen)
@@ -141,6 +142,22 @@ void appendFeatureRow(JsonObject row, const Features &f);
 bool tryImportGnbFromCloud();
 bool tryImportLogregFromCloud();
 void connectStaIfConfigured();
+
+/** Device-unique SoftAP password from eFuse MAC (min 8 chars for WPA2). */
+void initSoftApPassword() {
+  uint64_t mac = ESP.getEfuseMac();
+  snprintf(apPass, sizeof(apPass), "fbf%06X", (unsigned)(mac & 0xFFFFFF));
+  apPass[sizeof(apPass) - 1] = 0;
+}
+
+/** HTTPS with CA verify (GTS R4 + ISRG X1). No setInsecure(). */
+bool httpBeginUrl(HTTPClient &http, WiFiClientSecure &secure, const String &url) {
+  if (url.startsWith("https://")) {
+    secure.setCACert(ROOT_CAS);
+    return http.begin(secure, url);
+  }
+  return http.begin(url);
+}
 
 // ── Gaussian Naive Bayes pipeline ──────────────────────────────────
 // Features used for GNB (skip powerW — algebraically = 230*|I|)
@@ -849,19 +866,35 @@ void restoreDefaultThresholds() {
   }
 }
 
-// Label a feature row for dataset[] using thresholds + temperature sensor.
-// Instant (no debounce) — suitable for offline / ML training labels.
-int8_t computeTarget(const Features &f) {
-  int8_t t = 0;
+// Label a feature row for dataset[] using FIXED training bands — not live
+// alert thresholds. Adaptive / Settings threshold edits affect alerts only
+// (avoids label leakage where GNB/LR simply relearn the rule table).
+struct TrainLabelBand {
+  float warn;
+  float critical;
+};
 
-  // Temperature sensor is the primary fire-heating signal
+// Deliberately offset from default alert params (see params[] defaults).
+static const TrainLabelBand TRAIN_LABEL[P_COUNT] = {
+  {14.0f, 18.0f},   // current
+  {62.0f, 78.0f},   // temp
+  {13.0f, 17.0f},   // ma3I
+  {58.0f, 72.0f},   // ma3T
+  {1.00f,  2.50f},  // currentSlope
+  {0.40f,  0.80f},  // tempSlope
+  {0.70f,  1.80f},  // varI
+  {0.0f,   0.0f},   // power — skipped (algebraic with |I|)
+  {0.20f,  0.45f},  // tempAcc
+};
+
+/** Live rule risk class from current alert thresholds (debounce-free preview). */
+int8_t computeRuleClass(const Features &f) {
+  int8_t t = 0;
   float temp = f.tempC;
   if (!isnan(temp)) {
     if (temp >= params[P_TEMP].critical) t = 2;
     else if (temp >= params[P_TEMP].warn) t = 1;
   }
-
-  // Raise label if any other parameter crosses warn/critical
   for (int i = 0; i < P_COUNT; i++) {
     float v = applyDeadband(i, paramValue(f, i));
     int8_t lvl = 0;
@@ -871,6 +904,23 @@ int8_t computeTarget(const Features &f) {
   }
   return t;
 }
+
+/** Training label for ML dataset rows — independent of params[] / adaptive. */
+int8_t computeTrainLabel(const Features &f) {
+  int8_t t = 0;
+  for (int i = 0; i < P_COUNT; i++) {
+    if (i == P_POWER) continue;
+    float v = applyDeadband(i, paramValue(f, i));
+    int8_t lvl = 0;
+    if (TRAIN_LABEL[i].critical > 0.0f && v >= TRAIN_LABEL[i].critical) lvl = 2;
+    else if (TRAIN_LABEL[i].warn > 0.0f && v >= TRAIN_LABEL[i].warn) lvl = 1;
+    if (lvl > t) t = lvl;
+  }
+  return t;
+}
+
+// Back-compat name used in a few call sites → training label
+int8_t computeTarget(const Features &f) { return computeTrainLabel(f); }
 
 const char *targetName(int8_t t) {
   if (t >= 2) return "critical";
@@ -1080,7 +1130,7 @@ bool loadCloudConfigFromFs() {
   if (doc["cloudBaseUrl"].is<const char *>())
     strncpy(cloudBaseUrl, doc["cloudBaseUrl"] | DEFAULT_CLOUD_BASE_URL, sizeof(cloudBaseUrl) - 1);
   if (doc["cloudApiKey"].is<const char *>())
-    strncpy(cloudApiKey, doc["cloudApiKey"] | DEFAULT_CLOUD_API_KEY, sizeof(cloudApiKey) - 1);
+    strncpy(cloudApiKey, doc["cloudApiKey"] | "", sizeof(cloudApiKey) - 1);
   if (doc["deviceId"].is<const char *>())
     strncpy(deviceId, doc["deviceId"] | DEFAULT_DEVICE_ID, sizeof(deviceId) - 1);
   if (doc["currentSensorId"].is<const char *>())
@@ -1281,7 +1331,6 @@ bool tryUploadFullDatasetToCloud(bool force = false) {
   serializeJson(doc, body);
 
   String url = String(cloudBaseUrl) + "/api/ingest";
-  bool useTls = strncmp(cloudBaseUrl, "https://", 8) == 0;
   HTTPClient http;
   WiFiClientSecure secure;
   int code = -1;
@@ -1289,17 +1338,9 @@ bool tryUploadFullDatasetToCloud(bool force = false) {
   Serial.printf("[CLOUD] full dataset POST %s (%u bytes, %d rows)\n",
                 url.c_str(), (unsigned)body.length(), datasetCount);
 
-  if (useTls) {
-    secure.setInsecure();
-    if (!http.begin(secure, url)) {
-      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "begin failed");
-      return false;
-    }
-  } else {
-    if (!http.begin(url)) {
-      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "begin failed");
-      return false;
-    }
+  if (!httpBeginUrl(http, secure, url)) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "begin failed");
+    return false;
   }
 
   http.setTimeout(12000);
@@ -1350,29 +1391,19 @@ void cloudPushOsNotify(const Warning &w) {
   serializeJson(doc, body);
 
   String url = String(cloudBaseUrl) + "/api/devices/" + deviceId + "/notify";
-  bool useTls = strncmp(cloudBaseUrl, "https://", 8) == 0;
   HTTPClient http;
   WiFiClientSecure secure;
-  int code = -1;
 
-  if (useTls) {
-    secure.setInsecure();
-    if (!http.begin(secure, url)) {
-      Serial.println("[PUSH] begin failed");
-      return;
-    }
-  } else {
-    if (!http.begin(url)) {
-      Serial.println("[PUSH] begin failed");
-      return;
-    }
+  if (!httpBeginUrl(http, secure, url)) {
+    Serial.println("[PUSH] begin failed");
+    return;
   }
 
   http.setTimeout(8000);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", String("Bearer ") + cloudApiKey);
   http.addHeader("X-Device-Id", deviceId);
-  code = http.POST(body);
+  int code = http.POST(body);
   String resp = http.getString();
   http.end();
   Serial.printf("[PUSH] OS notify HTTP %d %s\n", code, resp.c_str());
@@ -1526,23 +1557,14 @@ bool tryImportGnbFromCloud() {
   }
 
   String url = String(cloudBaseUrl) + "/api/devices/" + deviceId + "/model";
-  bool useTls = strncmp(cloudBaseUrl, "https://", 8) == 0;
   HTTPClient http;
   WiFiClientSecure secure;
   snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "importing GNB…");
   Serial.printf("[CLOUD] GET model %s\n", url.c_str());
 
-  if (useTls) {
-    secure.setInsecure();
-    if (!http.begin(secure, url)) {
-      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
-      return false;
-    }
-  } else {
-    if (!http.begin(url)) {
-      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
-      return false;
-    }
+  if (!httpBeginUrl(http, secure, url)) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
+    return false;
   }
 
   http.setTimeout(12000);
@@ -1642,23 +1664,14 @@ bool tryImportLogregFromCloud() {
   }
 
   String url = String(cloudBaseUrl) + "/api/devices/" + deviceId + "/logreg";
-  bool useTls = strncmp(cloudBaseUrl, "https://", 8) == 0;
   HTTPClient http;
   WiFiClientSecure secure;
   snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "importing logreg…");
   Serial.printf("[CLOUD] GET logreg %s\n", url.c_str());
 
-  if (useTls) {
-    secure.setInsecure();
-    if (!http.begin(secure, url)) {
-      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
-      return false;
-    }
-  } else {
-    if (!http.begin(url)) {
-      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
-      return false;
-    }
+  if (!httpBeginUrl(http, secure, url)) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
+    return false;
   }
 
   http.setTimeout(12000);
@@ -1744,7 +1757,7 @@ void collapseBatchToAverage() {
   avg.currentA /= n; avg.tempC /= n; avg.ma3I /= n; avg.ma3T /= n;
   avg.currentSlope /= n; avg.tempSlope /= n; avg.varI /= n;
   avg.powerW /= n; avg.tempAcc /= n;
-  avg.target = computeTarget(avg);  // label from thresholds + temp sensor
+  avg.target = computeTrainLabel(avg);  // independent train bands (not alert thresholds)
 
   memset(batch, 0, sizeof(batch));
   batch[0] = avg;
@@ -1884,6 +1897,7 @@ void handleStatus() {
   JsonObject net = doc["network"].to<JsonObject>();
   net["apIp"] = WiFi.softAPIP().toString();
   net["apSsid"] = AP_SSID;
+  net["apPass"] = apPass;
   net["staConnected"] = WiFi.status() == WL_CONNECTED;
   net["staIp"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
   net["staSsid"] = staSsid;
@@ -1945,8 +1959,13 @@ void handleStatus() {
 
   JsonObject feat = doc["features"].to<JsonObject>();
   Features live = latest;
-  live.target = computeTarget(latest);  // preview label (dataset rows get final label at batch collapse)
+  live.target = computeTrainLabel(latest);
   appendFeatureRow(feat, live);
+  feat["trainLabel"] = (int)live.target;
+  feat["trainLabelName"] = targetName(live.target);
+  feat["ruleClass"] = (int)computeRuleClass(latest);
+  feat["ruleClassName"] = targetName(computeRuleClass(latest));
+  feat["labelPolicy"] = "train_bands_independent";
 
   JsonObject th = doc["thresholds"].to<JsonObject>();
   appendParamsJson(th);
@@ -2172,16 +2191,17 @@ void setupWeb() {
   IPAddress subnet(255, 255, 255, 0);
   WiFi.softAPConfig(apIP, gateway, subnet);
 
-  bool apOk = WiFi.softAP(AP_SSID, AP_PASS, 6, 0, 4);
+  initSoftApPassword();
+  bool apOk = WiFi.softAP(AP_SSID, apPass, 6, 0, 4);
   delay(300);
 
   Serial.println();
   Serial.println("========================================");
   Serial.printf("SoftAP %s\n", apOk ? "STARTED" : "FAILED");
   Serial.printf("  SSID    : %s\n", AP_SSID);
-  Serial.printf("  Password: %s\n", AP_PASS);
+  Serial.printf("  Password: %s  (device-unique — also in Settings)\n", apPass);
   Serial.printf("  Open    : http://%s\n", WiFi.softAPIP().toString().c_str());
-  Serial.println("  Cloud   : set home Wi‑Fi in Settings page");
+  Serial.println("  Cloud   : set home Wi‑Fi + API key in Settings");
   Serial.printf("  Default : %s\n", cloudBaseUrl);
   Serial.println("========================================");
 
@@ -2314,7 +2334,7 @@ void setup() {
   calibrateZero();
 
   Serial.println("Fire Before Fire — ready (false-alarm hardened)");
-  Serial.println("Connect Wi‑Fi: FireBeforeFire / firebefore123");
+  Serial.printf("Connect Wi‑Fi: %s / %s\n", AP_SSID, apPass);
   Serial.println("Open: http://192.168.4.1");
   Serial.println("# I  T  MA3I MA3T dI/dt dT/dt Var P d2T  risk%");
 }

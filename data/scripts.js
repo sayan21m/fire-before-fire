@@ -2189,8 +2189,12 @@ async function pollLiveStatus() {
     renderWarnings(data.warnings || [], { source: data.predictionSource });
     renderParamStatus(data.paramStatus || []);
     applyLiveAlerts(data.warnings || []);
-    updatePwaNetworkUrls(data);
-    connectAlertWebSocket(data);
+  updatePwaNetworkUrls(data);
+  const apSsid = document.getElementById("cfg-ap-ssid");
+  const apPassEl = document.getElementById("cfg-ap-pass");
+  if (apSsid) apSsid.textContent = data.network?.apSsid || "FireBeforeFire";
+  if (apPassEl) apPassEl.textContent = data.network?.apPass || "(see Serial)";
+  connectAlertWebSocket(data);
     renderThresholdEditor(
       thresholdCache,
       liveValuesFromFeatures(data.features),
@@ -2205,7 +2209,7 @@ async function pollLiveStatus() {
     const banner = document.getElementById("sensor-fault-banner");
     if (banner) {
       banner.textContent =
-        "ESP32 offline — join Wi‑Fi FireBeforeFire / firebefore123, then open http://192.168.4.1";
+        "ESP32 offline — join SoftAP FireBeforeFire (password on Serial / device-unique), then open http://192.168.4.1";
       banner.classList.remove("hidden");
     }
     if (!document.getElementById("threshold-editor-body")?.children.length) {
@@ -2351,7 +2355,10 @@ function updatePwaNetworkUrls(data) {
   const lan = document.getElementById("pwa-lan-url");
   const osUrl = document.getElementById("pwa-os-notify-url");
   const apIp = net.apIp || "192.168.4.1";
-  if (ap) ap.textContent = `http://${apIp}`;
+  if (ap) {
+    const pass = net.apPass ? ` / ${net.apPass}` : " (see Serial for password)";
+    ap.textContent = `http://${apIp}${pass}`;
+  }
   if (lan) {
     if (net.staConnected && net.staIp) {
       lan.textContent = `http://${net.staIp}  (open on any phone on ${net.staSsid || "home Wi‑Fi"})`;

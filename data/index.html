@@ -1003,7 +1003,8 @@
                       Wi‑Fi SoftAP
                     </p>
                     <p class="mt-1 font-mono text-ink">
-                      FireBeforeFire / firebefore123
+                      FireBeforeFire — password is device-unique (Serial Monitor
+                      or Settings → SoftAP after you connect once)
                     </p>
                     <p class="mt-1 text-xs text-ink-dim">
                       Dashboard at http://192.168.4.1 · no internet required
@@ -1760,6 +1761,24 @@
                 </div>
 
                 <!-- Cloud / home Wi‑Fi (set on device; URL defaults to Render) -->
+                <div class="glass rounded-2xl p-5 shadow-glass mb-4 xl:col-span-2">
+                  <h3
+                    class="text-sm font-semibold text-ink mb-1 flex items-center gap-2"
+                  >
+                    <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+                    SoftAP access
+                  </h3>
+                  <p class="text-xs text-ink-dim mb-3">
+                    Password is unique per ESP chip (not a shared default). First
+                    join: read Serial Monitor. After connect it is shown here.
+                  </p>
+                  <p class="text-sm font-mono text-ink">
+                    <span id="cfg-ap-ssid">FireBeforeFire</span>
+                    /
+                    <span id="cfg-ap-pass">…</span>
+                  </p>
+                </div>
+
                 <div class="glass rounded-2xl p-5 shadow-glass xl:col-span-2">
                   <h3
                     class="text-sm font-semibold text-ink mb-1 flex items-center gap-2"
@@ -1811,6 +1830,7 @@
                         id="cfg-cloud-key"
                         type="text"
                         autocomplete="off"
+                        placeholder="Required — must match Render CLOUD_API_KEY"
                         class="mt-1 w-full rounded-lg border border-surface-border bg-surface-raised px-3 py-2 text-sm font-mono text-ink"
                       />
                     </label>

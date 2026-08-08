@@ -38,10 +38,10 @@ At idle with no load, **current ≈ 0 A** (and power/risk near zero) is expected
 
 ## Features
 
-- SoftAP Wi‑Fi (`FireBeforeFire` / `firebefore123`) → dashboard at `http://192.168.4.1`
-- **OS notifications** via HTTPS Web Push on Render (`/notify`); SoftAP also has in-app banner/beep alerts over WebSocket (port 81)
-- Per-device **sensor IDs + locations** (e.g. `I-01` / `T-01` under `esp32-01`) shown on the dashboard and in alerts
-- Cloud **auto-refits GNB and softmax LR** on every device ingest
+- SoftAP Wi‑Fi (`FireBeforeFire`, **device-unique password** printed on Serial / shown in Settings) → `http://192.168.4.1`
+- Cloud API key is **not** baked into firmware — set it in Settings to match Render `CLOUD_API_KEY`
+- HTTPS to Render uses **CA verification** (GTS Root R4 + ISRG X1); no `setInsecure()`
+- Dataset ML labels use **fixed training bands**, independent of live alert thresholds (reduces label leakage)
 - Live KPIs, sparklines, monitoring charts, alerts, event history, CSV/JSON export
 - Online/offline pill, theme toggle, auto-refresh, mobile-friendly layout
 - Nine-parameter threshold table (manual + adaptive, never below factory defaults)
@@ -207,14 +207,13 @@ Rewrites LittleFS (clears `/dataset.bin` and saved cloud config).
 
 ### 4. Open the dashboard
 
-1. Join Wi‑Fi **FireBeforeFire** (password `firebefore123`)
+1. Join Wi‑Fi **FireBeforeFire** — password is **device-unique** (`fbf` + last 6 hex of MAC). Read it from Serial Monitor on boot, or from Settings after you connect.
 2. Ignore “no internet” on the phone
 3. Open **http://192.168.4.1**
-4. **Settings** → home Wi‑Fi → **Save & connect** (for auto cloud sync)
-5. **Settings** → home Wi‑Fi → **Save & connect** (for auto cloud sync)
-6. **Settings → App & phone notifications** → **Enable OS notifications** (opens HTTPS `/notify` on Render; leave SoftAP first) + optional in-app alerts / Install app  
+4. **Settings** → home Wi‑Fi + **Cloud API key** (must match Render `CLOUD_API_KEY`) → **Save & connect**
+5. **Settings → App & phone notifications** → **Enable OS notifications** (opens HTTPS `/notify` on Render; leave SoftAP first) + optional in-app alerts / Install app  
    Other phones on home Wi‑Fi: open the **LAN URL** shown there (ESP STA IP)
-7. Hard-refresh if the UI looks stale after `uploadfs`
+6. Hard-refresh if the UI looks stale after `uploadfs`
 
 Serial tips:
 

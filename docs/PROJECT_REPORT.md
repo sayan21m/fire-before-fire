@@ -205,7 +205,7 @@ Optional local cloud:
 cd cloud && npm install && npm run train && npm start
 ```
 
-Join SoftAP **FireBeforeFire** / **firebefore123** → **http://192.168.4.1** → Settings → home Wi‑Fi for auto sync.
+Join SoftAP **FireBeforeFire** (device-unique password on Serial) → **http://192.168.4.1** → Settings → home Wi‑Fi + API key for auto sync.
 
 ---
 
@@ -279,7 +279,7 @@ Fire Before Fire demonstrates a complete **local early-warning loop**—sense �
 | Setting  | Value |
 | -------- | ----- |
 | SSID     | `FireBeforeFire` |
-| Password | `firebefore123` |
+| SoftAP password | Device-unique `fbf` + MAC (Serial / Settings) |
 | URL      | `http://192.168.4.1` |
 
 ## Appendix C — `/api/status` extras
