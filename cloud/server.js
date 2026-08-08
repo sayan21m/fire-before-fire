@@ -1,12 +1,11 @@
 /**
- * Fire Before Fire — Render ingest + GNB training pipeline
+ * Fire Before Fire — Render ingest + GNB + softmax LR + Web Push OS alerts
  *
- * Boot: seed corpus from cloud/seed/*.csv → fit global GNB
- * POST /api/ingest              → append device rows → refit
- * GET  /api/devices/:id/model   → download latest GNB (seed + all ingests)
- * GET  /api/train/status        → corpus / model stats
- * POST /api/train/refit         → force refit on current corpus
- * GET  /api/devices             → list devices
+ * Boot: seed corpus + install softmax_logreg.json
+ * POST /api/ingest                 → append rows → refit GNB
+ * GET  /api/devices/:id/model|logreg
+ * POST /api/devices/:id/notify     → OS Web Push to subscribed phones (auth)
+ * GET  /notify                     → HTTPS page to grant OS notification permission
  * GET  /health
  */
 require("dotenv").config();
@@ -16,12 +15,14 @@ const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 const { TrainPipeline } = require("./lib/pipeline");
+const { createPushStore } = require("./lib/push");
 
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.CLOUD_API_KEY || "change-me-fbf-key";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const SEED_DIR = process.env.SEED_DIR || path.join(__dirname, "seed");
 const DEFAULT_DEVICE_ID = process.env.DEFAULT_DEVICE_ID || "esp32-01";
+const PUBLIC_DIR = path.join(__dirname, "public");
 
 const pipeline = new TrainPipeline({
   dataDir: DATA_DIR,
@@ -30,6 +31,7 @@ const pipeline = new TrainPipeline({
 });
 
 const boot = pipeline.bootstrap();
+const push = createPushStore({ dataDir: DATA_DIR });
 
 const app = express();
 app.use(cors());
@@ -51,6 +53,19 @@ function safeId(id) {
     .slice(0, 64);
 }
 
+app.get("/notify-sw.js", (_req, res) => {
+  res.set("Service-Worker-Allowed", "/");
+  res.set("Cache-Control", "no-cache");
+  res.type("application/javascript");
+  res.sendFile(path.join(PUBLIC_DIR, "notify-sw.js"));
+});
+
+app.get("/notify", (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, "notify.html"));
+});
+
+app.use(express.static(PUBLIC_DIR));
+
 app.get("/", (_req, res) => {
   const st = pipeline.status();
   res.type("html").send(`<!doctype html>
@@ -58,20 +73,15 @@ app.get("/", (_req, res) => {
 <style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;line-height:1.5}
 code{background:#f4f4f5;padding:.1rem .35rem;border-radius:4px}</style></head><body>
 <h1>Fire Before Fire — Cloud</h1>
-<p>GNB pipeline: seed CSV → device ingest → refit corpus.</p>
+<p>GNB corpus + softmax LR hosting + <strong>OS Web Push</strong> alerts.</p>
 <ul>
-  <li>Corpus rows: <strong>${st.corpusRows}</strong> · classes [${st.classCounts.join(", ")}]</li>
-  <li>Seed files: ${st.seededFiles.map((f) => `<code>${f}</code>`).join(" ") || "—"}</li>
-  <li>Device ingests: ${st.ingestCount}</li>
-  <li>Last fit: ${st.lastFitAt || "—"}</li>
+  <li>Corpus rows: <strong>${st.corpusRows}</strong></li>
+  <li>Push enabled: <strong>${push.enabled ? "yes" : "no — set VAPID_* env"}</strong> · subscribers: ${push.count()}</li>
 </ul>
 <ul>
+  <li><a href="/notify">/notify</a> — enable OS notifications (HTTPS)</li>
   <li><a href="/health">/health</a></li>
-  <li><code>POST /api/ingest</code> — device dataset → append + retrain</li>
-  <li><code>GET /api/devices/:id/model</code> — GNB (ESP import)</li>
-  <li><code>GET /api/devices/:id/logreg</code> — softmax LR (ESP import)</li>
-  <li><code>GET /api/train/status</code></li>
-  <li><code>POST /api/train/refit</code></li>
+  <li><code>POST /api/devices/:id/notify</code> — ESP hazard → phone OS alert</li>
 </ul>
 </body></html>`);
 });
@@ -84,12 +94,70 @@ app.get("/health", (_req, res) => {
     ts: new Date().toISOString(),
     corpusRows: st.corpusRows,
     lastFitAt: st.lastFitAt,
+    pushEnabled: push.enabled,
+    pushSubscribers: push.count(),
     boot,
   });
 });
 
+app.get("/api/push/vapid-public", (_req, res) => {
+  if (!push.enabled || !push.publicKey) {
+    return res.status(503).json({
+      ok: false,
+      error: "VAPID keys not configured on server (set VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)",
+    });
+  }
+  res.json({ ok: true, publicKey: push.publicKey });
+});
+
+app.post("/api/push/subscribe", (req, res) => {
+  const body = req.body || {};
+  const deviceId = safeId(body.deviceId || DEFAULT_DEVICE_ID);
+  const result = push.subscribe(deviceId, body.subscription, {
+    userAgent: body.userAgent || req.headers["user-agent"] || "",
+  });
+  if (!result.ok) return res.status(400).json(result);
+  console.log(`[push] subscribe device=${deviceId} n=${result.count}`);
+  res.json(result);
+});
+
+app.post("/api/push/test", async (req, res) => {
+  const deviceId = safeId((req.body || {}).deviceId || DEFAULT_DEVICE_ID);
+  const result = await push.notifyDevice(deviceId, {
+    title: "Fire Before Fire — test",
+    body: "OS notification path OK for " + deviceId,
+    level: "warn",
+    tag: "fbf-test",
+  });
+  res.status(result.ok ? 200 : 503).json(result);
+});
+
+app.post("/api/devices/:id/notify", auth, async (req, res) => {
+  const id = safeId(req.params.id);
+  const body = req.body || {};
+  const level = body.level === "critical" ? "critical" : "warn";
+  const title =
+    body.title ||
+    (level === "critical"
+      ? "Fire Before Fire — CRITICAL"
+      : "Fire Before Fire — Warning");
+  const text =
+    body.body ||
+    body.message ||
+    `${body.label || body.param || "hazard"}: ${body.value ?? ""}`;
+  const result = await push.notifyDevice(id, {
+    title,
+    body: String(text),
+    level,
+    tag: body.tag || `fbf-${body.param || "alert"}-${body.ms || Date.now()}`,
+    url: "/notify",
+  });
+  console.log(`[push] notify ${id} sent=${result.sent}/${result.subscribers || 0}`);
+  res.status(result.ok ? 200 : 503).json(result);
+});
+
 app.get("/api/train/status", auth, (_req, res) => {
-  res.json(pipeline.status());
+  res.json({ ...pipeline.status(), pushEnabled: push.enabled, pushSubscribers: push.count() });
 });
 
 app.post("/api/train/refit", auth, (_req, res) => {
@@ -171,6 +239,8 @@ app.get("/api/devices", auth, (_req, res) => {
     count: devices.length,
     devices,
     train: pipeline.status(),
+    pushEnabled: push.enabled,
+    pushSubscribers: push.count(),
   });
 });
 
@@ -221,6 +291,9 @@ app.listen(PORT, () => {
   console.log(`Fire Before Fire cloud on :${PORT}`);
   console.log(
     `API key: ${API_KEY !== "change-me-fbf-key" ? "custom" : "DEFAULT — set CLOUD_API_KEY"}`,
+  );
+  console.log(
+    `Push: ${push.enabled ? "VAPID ready" : "DISABLED — set VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY"}`,
   );
   console.log(
     `Pipeline: corpus=${pipeline.status().corpusRows} seed=${SEED_DIR}`,

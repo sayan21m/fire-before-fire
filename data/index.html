@@ -2,8 +2,21 @@
 <html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B1220" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Fire Before Fire" />
+    <meta name="application-name" content="Fire Before Fire" />
+    <meta
+      name="description"
+      content="ESP32 early electrical heating alerts — install as an app for phone notifications"
+    />
     <title>Fire Before Fire — ESP32 Node</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <!-- Bundled Tailwind + theme (works on SoftAP without internet) -->
     <link rel="stylesheet" href="/app.css" />
     <!-- Plotly optional: loads when client has internet -->
@@ -1818,6 +1831,82 @@
                   </div>
                 </div>
 
+                <!-- PWA / phone notifications -->
+                <div class="glass rounded-2xl p-5 shadow-glass">
+                  <h3
+                    class="text-sm font-semibold text-ink mb-1 flex items-center gap-2"
+                  >
+                    <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+                    App &amp; phone notifications
+                  </h3>
+                  <p class="text-xs text-ink-dim mb-4">
+                    SoftAP is plain HTTP, so browsers
+                    <strong class="font-medium text-ink-muted">block OS notification popups</strong>
+                    here. Use
+                    <strong class="font-medium text-ink-muted">in-app alerts</strong>
+                    on SoftAP, and open the
+                    <strong class="font-medium text-ink-muted">HTTPS cloud page</strong>
+                    once for real OS notifications (works with the phone locked).
+                  </p>
+                  <div class="space-y-3 text-sm">
+                    <div>
+                      <p class="text-[10px] uppercase text-ink-dim">SoftAP URL</p>
+                      <p id="pwa-ap-url" class="font-mono text-ink break-all">
+                        http://192.168.4.1
+                      </p>
+                    </div>
+                    <div>
+                      <p class="text-[10px] uppercase text-ink-dim">
+                        Home Wi‑Fi LAN URL (other phones)
+                      </p>
+                      <p id="pwa-lan-url" class="font-mono text-ink break-all">
+                        Connect home Wi‑Fi first…
+                      </p>
+                    </div>
+                    <div>
+                      <p class="text-[10px] uppercase text-ink-dim">
+                        OS notifications (HTTPS)
+                      </p>
+                      <p id="pwa-os-notify-url" class="font-mono text-ink break-all text-xs">
+                        https://fire-before-fire.onrender.com/notify
+                      </p>
+                    </div>
+                    <p id="pwa-notify-status" class="text-xs text-ink-dim">
+                      Alerts: off
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                      <button
+                        id="btn-enable-os-notifications"
+                        type="button"
+                        class="rounded-lg border border-accent/40 bg-accent-soft px-3 py-2 text-xs text-accent-muted hover:bg-accent/20 transition"
+                      >
+                        Enable OS notifications
+                      </button>
+                      <button
+                        id="btn-enable-notifications"
+                        type="button"
+                        class="rounded-lg border border-surface-border px-3 py-2 text-xs text-ink-muted hover:bg-surface-hover transition"
+                      >
+                        Enable in-app alerts
+                      </button>
+                      <button
+                        id="btn-install-pwa"
+                        type="button"
+                        class="rounded-lg border border-surface-border px-3 py-2 text-xs text-ink-muted hover:bg-surface-hover transition"
+                      >
+                        Install app
+                      </button>
+                      <button
+                        id="btn-test-notification"
+                        type="button"
+                        class="rounded-lg border border-surface-border px-3 py-2 text-xs text-ink-muted hover:bg-surface-hover transition"
+                      >
+                        Test alert
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Physics -->
                 <div class="glass rounded-2xl p-5 shadow-glass">
                   <h3
@@ -1922,6 +2011,27 @@
             </section>
           </div>
         </main>
+      </div>
+    </div>
+
+    <!-- In-app push banner (works on SoftAP HTTP without OS permission) -->
+    <div
+      id="push-banner"
+      class="fixed inset-x-3 top-3 z-[70] hidden rounded-xl border px-4 py-3 shadow-glass animate-slideIn"
+      role="alert"
+    >
+      <div class="flex items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <p id="push-banner-title" class="text-sm font-semibold text-ink"></p>
+          <p id="push-banner-body" class="mt-0.5 text-xs text-ink-muted"></p>
+        </div>
+        <button
+          type="button"
+          id="push-banner-dismiss"
+          class="shrink-0 rounded-lg px-2 py-1 text-xs text-ink-dim hover:bg-surface-hover"
+        >
+          Dismiss
+        </button>
       </div>
     </div>
 

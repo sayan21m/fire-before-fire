@@ -1051,6 +1051,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (lu) lu.textContent = "just now";
 
   initPredictionUI();
+  initPwaApp();
   startPolling();
 
   window.addEventListener("resize", () => {
@@ -2116,6 +2117,8 @@ function applyLiveAlerts(warnings) {
   if (historyEvents.length > 80) historyEvents.length = 80;
   renderHistory();
 
+  (warnings || []).forEach((w) => maybeNotifyWarning(w));
+
   const badge = document.getElementById("alert-badge");
   if (badge) badge.textContent = String(mapped.length);
 
@@ -2145,6 +2148,8 @@ async function pollLiveStatus() {
     renderWarnings(data.warnings || [], { source: data.predictionSource });
     renderParamStatus(data.paramStatus || []);
     applyLiveAlerts(data.warnings || []);
+    updatePwaNetworkUrls(data);
+    connectAlertWebSocket(data);
     renderThresholdEditor(
       thresholdCache,
       liveValuesFromFeatures(data.features),
@@ -2259,6 +2264,314 @@ function initPredictionUI() {
 
   renderThresholdEditor(thresholdCache, {});
   pollLiveStatus();
+}
+
+/* ── PWA install + multi-phone alerts (SoftAP-safe) ───────────────── */
+let deferredInstallPrompt = null;
+let alertWs = null;
+let swReg = null;
+const notifiedAlertKeys = new Set();
+let notificationsWanted = localStorage.getItem("fbf_notify") === "1";
+let pushBannerTimer = null;
+
+function canUseOsNotifications() {
+  return (
+    typeof Notification !== "undefined" &&
+    !!window.isSecureContext &&
+    (location.protocol === "https:" ||
+      location.hostname === "localhost" ||
+      location.hostname === "127.0.0.1")
+  );
+}
+
+function updatePwaNotifyStatus() {
+  const el = document.getElementById("pwa-notify-status");
+  if (!el) return;
+  const ws = alertWs && alertWs.readyState === WebSocket.OPEN ? "live WS" : "poll";
+  if (!notificationsWanted) {
+    el.textContent = `Alerts: off · channel: ${ws}`;
+    return;
+  }
+  if (canUseOsNotifications() && Notification.permission === "granted") {
+    el.textContent = `Alerts: on (OS + in-app) · ${ws}`;
+  } else if (!window.isSecureContext) {
+    el.textContent = `Alerts: on (in-app — SoftAP HTTP can't use OS popups) · ${ws}`;
+  } else if (typeof Notification !== "undefined" && Notification.permission === "denied") {
+    el.textContent = `Alerts: on (in-app — OS permission blocked in browser settings) · ${ws}`;
+  } else {
+    el.textContent = `Alerts: on (in-app) · ${ws}`;
+  }
+}
+
+function updatePwaNetworkUrls(data) {
+  const net = data.network || {};
+  const cloud = data.cloud || {};
+  const ap = document.getElementById("pwa-ap-url");
+  const lan = document.getElementById("pwa-lan-url");
+  const osUrl = document.getElementById("pwa-os-notify-url");
+  const apIp = net.apIp || "192.168.4.1";
+  if (ap) ap.textContent = `http://${apIp}`;
+  if (lan) {
+    if (net.staConnected && net.staIp) {
+      lan.textContent = `http://${net.staIp}  (open on any phone on ${net.staSsid || "home Wi‑Fi"})`;
+    } else {
+      lan.textContent = "Connect home Wi‑Fi in Settings first…";
+    }
+  }
+  if (osUrl) {
+    const base = (
+      cloud.url ||
+      cloud.cloudBaseUrl ||
+      "https://fire-before-fire.onrender.com"
+    ).replace(/\/$/, "");
+    const id = encodeURIComponent(cloud.deviceId || "esp32-01");
+    osUrl.textContent = `${base}/notify?device=${id}`;
+  }
+}
+
+async function openOsNotifyPage() {
+  const el = document.getElementById("pwa-os-notify-url");
+  const url =
+    (el && el.textContent && el.textContent.trim()) ||
+    "https://fire-before-fire.onrender.com/notify";
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+    }
+  } catch (_) {}
+  // SoftAP usually has no internet — open may fail; clipboard + leave SoftAP is the path.
+  try {
+    window.open(url, "_blank", "noopener,noreferrer");
+  } catch (_) {}
+  showToast(
+    "OS notify URL ready — leave SoftAP, open on home Wi‑Fi or mobile data, tap Allow",
+  );
+}
+
+async function ensureServiceWorker() {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) return null;
+  try {
+    swReg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    return swReg;
+  } catch (e) {
+    console.warn("SW register failed", e);
+    return null;
+  }
+}
+
+function playAlertBeep(critical) {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "square";
+    o.frequency.value = critical ? 880 : 660;
+    g.gain.value = 0.04;
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start();
+    setTimeout(() => {
+      o.stop();
+      ctx.close();
+    }, critical ? 350 : 180);
+  } catch (_) {}
+}
+
+function showInAppPush(title, body, level) {
+  const banner = document.getElementById("push-banner");
+  const t = document.getElementById("push-banner-title");
+  const b = document.getElementById("push-banner-body");
+  if (!banner || !t || !b) {
+    showToast(`${title}: ${body}`);
+    return;
+  }
+  t.textContent = title;
+  b.textContent = body;
+  const crit = level === "critical";
+  banner.className =
+    "fixed inset-x-3 top-3 z-[70] rounded-xl border px-4 py-3 shadow-glass animate-slideIn " +
+    (crit
+      ? "border-danger/50 bg-danger-soft"
+      : "border-warning/50 bg-warning-soft");
+  banner.classList.remove("hidden");
+  clearTimeout(pushBannerTimer);
+  pushBannerTimer = setTimeout(() => banner.classList.add("hidden"), 8000);
+  try {
+    if (navigator.vibrate) navigator.vibrate(crit ? [120, 60, 120] : [80]);
+  } catch (_) {}
+  playAlertBeep(crit);
+}
+
+async function showPhoneNotification(title, body, opts = {}) {
+  if (!canUseOsNotifications()) return false;
+  if (Notification.permission !== "granted") return false;
+  const payload = {
+    type: "notify",
+    title,
+    body,
+    tag: opts.tag || "fbf-alert",
+    requireInteraction: !!opts.requireInteraction,
+    url: "/",
+  };
+  const reg = swReg || (await navigator.serviceWorker.getRegistration());
+  if (reg && reg.active) {
+    reg.active.postMessage(payload);
+    return true;
+  }
+  try {
+    new Notification(title, {
+      body,
+      tag: payload.tag,
+      icon: "/icon-192.png",
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function deliverAlert(title, body, level, tag) {
+  showInAppPush(title, body, level);
+  showPhoneNotification(title, body, {
+    tag: tag || "fbf-alert",
+    requireInteraction: level === "critical",
+  });
+}
+
+function alertKey(w) {
+  return `${w.param}|${w.level}|${Math.round(w.ms || Date.now())}`;
+}
+
+function maybeNotifyWarning(w) {
+  if (!notificationsWanted || !w) return;
+  const key = alertKey(w);
+  if (notifiedAlertKeys.has(key)) return;
+  notifiedAlertKeys.add(key);
+  if (notifiedAlertKeys.size > 80) {
+    const first = notifiedAlertKeys.values().next().value;
+    notifiedAlertKeys.delete(first);
+  }
+  const title =
+    w.level === "critical"
+      ? "Fire Before Fire — CRITICAL"
+      : "Fire Before Fire — Warning";
+  const val = Number(w.value);
+  const thr = Number(w.threshold);
+  const body = `${w.label || w.param}: ${Number.isFinite(val) ? val.toFixed(2) : w.value} (thr ${Number.isFinite(thr) ? thr.toFixed(2) : w.threshold})`;
+  deliverAlert(title, body, w.level || "warn", key);
+}
+
+function connectAlertWebSocket(data) {
+  const net = data.network || {};
+  const port = net.wsPort || 81;
+  const host = location.hostname;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${proto}//${host}:${port}/`;
+  if (alertWs && (alertWs.readyState === WebSocket.OPEN || alertWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  try {
+    alertWs = new WebSocket(url);
+  } catch (_) {
+    updatePwaNotifyStatus();
+    return;
+  }
+  alertWs.onopen = () => updatePwaNotifyStatus();
+  alertWs.onclose = () => {
+    updatePwaNotifyStatus();
+    setTimeout(() => {
+      if (liveState) connectAlertWebSocket(liveState);
+    }, 4000);
+  };
+  alertWs.onerror = () => updatePwaNotifyStatus();
+  alertWs.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === "alert") maybeNotifyWarning(msg);
+    } catch (_) {}
+  };
+}
+
+async function enableNotifications() {
+  // Always enable in-app channel — this is what works on SoftAP HTTP.
+  notificationsWanted = true;
+  localStorage.setItem("fbf_notify", "1");
+
+  let osNote = "";
+  if (canUseOsNotifications()) {
+    await ensureServiceWorker();
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm === "granted") osNote = " + OS popups";
+      else if (perm === "denied")
+        osNote = " (OS popups blocked — use browser site settings to allow)";
+    } catch (_) {
+      osNote = " (OS popups unavailable)";
+    }
+  } else {
+    osNote = " (OS popups need HTTPS; SoftAP uses in-app alerts)";
+  }
+
+  updatePwaNotifyStatus();
+  deliverAlert(
+    "Fire Before Fire — alerts on",
+    "This phone will show banners/sound when risk rises" + osNote,
+    "warn",
+    "fbf-welcome-" + Date.now(),
+  );
+  showToast("In-app alerts enabled" + osNote);
+}
+
+async function testNotification() {
+  notificationsWanted = true;
+  localStorage.setItem("fbf_notify", "1");
+  updatePwaNotifyStatus();
+  deliverAlert(
+    "Fire Before Fire — test",
+    "In-app alert OK. OS popup only works on HTTPS / after Install on some phones.",
+    "warn",
+    "fbf-test-" + Date.now(),
+  );
+  showToast("Test alert sent");
+}
+
+function initPwaApp() {
+  if (window.isSecureContext) ensureServiceWorker();
+  updatePwaNotifyStatus();
+  document
+    .getElementById("push-banner-dismiss")
+    ?.addEventListener("click", () => {
+      document.getElementById("push-banner")?.classList.add("hidden");
+    });
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+  });
+  document
+    .getElementById("btn-enable-notifications")
+    ?.addEventListener("click", enableNotifications);
+  document
+    .getElementById("btn-enable-os-notifications")
+    ?.addEventListener("click", openOsNotifyPage);
+  document
+    .getElementById("btn-test-notification")
+    ?.addEventListener("click", testNotification);
+  document.getElementById("btn-install-pwa")?.addEventListener("click", async () => {
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      const choice = await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      showToast(
+        choice.outcome === "accepted" ? "App install started" : "Install dismissed",
+      );
+      return;
+    }
+    showToast(
+      "Browser menu → Add to Home Screen (iOS: Share → Add to Home Screen)",
+    );
+  });
 }
 
 /* Expose for inline handlers */

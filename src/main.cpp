@@ -16,6 +16,7 @@
 #include <ArduinoJson.h>
 #include <math.h>
 #include <string.h>
+#include <WebSocketsServer.h>
 
 // ── WiFi SoftAP (phone/laptop → FireBeforeFire → http://192.168.4.1) ──
 #define AP_SSID "FireBeforeFire"
@@ -58,6 +59,9 @@ DallasTemperature sensors(&oneWire);
 
 WebServer server(80);
 DNSServer dnsServer;
+WebSocketsServer alertWs(81);
+int alertWsClients = 0;
+
 const byte DNS_PORT = 53;
 
 // ── Feature window ─────────────────────────────────────────────────
@@ -289,12 +293,46 @@ float applyDeadband(int id, float v) {
 
 WarnLevel prevLevels[P_COUNT] = {};
 
+/** HTTPS Web Push via Render when STA is up (SoftAP HTTP cannot do OS popups). */
+void cloudPushOsNotify(const Warning &w);
+
 void pushAlert(const Warning &w) {
   if (alertLogCount < MAX_ALERT_LOG) {
     alertLog[alertLogCount++] = w;
   } else {
     for (int i = 1; i < MAX_ALERT_LOG; i++) alertLog[i - 1] = alertLog[i];
     alertLog[MAX_ALERT_LOG - 1] = w;
+  }
+  // Fan out to every browser/PWA currently connected (SoftAP or home LAN)
+  JsonDocument doc;
+  doc["type"] = "alert";
+  doc["param"] = w.param;
+  doc["label"] = w.label;
+  doc["level"] = w.level;
+  doc["value"] = w.value;
+  doc["threshold"] = w.threshold;
+  doc["ms"] = w.ms;
+  doc["clients"] = alertWsClients;
+  String out;
+  serializeJson(doc, out);
+  alertWs.broadcastTXT(out);
+  Serial.printf("[PWA] alert broadcast → %d ws client(s): %s\n",
+                alertWsClients, w.label);
+  cloudPushOsNotify(w);
+}
+
+void onAlertWsEvent(uint8_t num, WStype_t type, uint8_t * /*payload*/, size_t /*len*/) {
+  switch (type) {
+    case WStype_CONNECTED:
+      alertWsClients++;
+      Serial.printf("[PWA] ws client #%u connected (n=%d)\n", num, alertWsClients);
+      break;
+    case WStype_DISCONNECTED:
+      if (alertWsClients > 0) alertWsClients--;
+      Serial.printf("[PWA] ws client #%u gone (n=%d)\n", num, alertWsClients);
+      break;
+    default:
+      break;
   }
 }
 
@@ -1213,6 +1251,55 @@ bool tryUploadFullDatasetToCloud(bool force = false) {
   return false;
 }
 
+/**
+ * Tell Render to send OS Web Push to phones that subscribed at /notify.
+ * Requires STA + cloud URL; phones must have visited the HTTPS subscribe page.
+ */
+void cloudPushOsNotify(const Warning &w) {
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (strlen(cloudBaseUrl) == 0 || strlen(cloudApiKey) == 0) return;
+
+  JsonDocument doc;
+  doc["level"] = (strcmp(w.level, "critical") == 0) ? "critical" : "warn";
+  doc["param"] = w.param;
+  doc["label"] = w.label;
+  doc["value"] = w.value;
+  doc["threshold"] = w.threshold;
+  doc["ms"] = w.ms;
+  doc["body"] = String(w.label) + ": " + String(w.value, 2);
+
+  String body;
+  serializeJson(doc, body);
+
+  String url = String(cloudBaseUrl) + "/api/devices/" + deviceId + "/notify";
+  bool useTls = strncmp(cloudBaseUrl, "https://", 8) == 0;
+  HTTPClient http;
+  WiFiClientSecure secure;
+  int code = -1;
+
+  if (useTls) {
+    secure.setInsecure();
+    if (!http.begin(secure, url)) {
+      Serial.println("[PUSH] begin failed");
+      return;
+    }
+  } else {
+    if (!http.begin(url)) {
+      Serial.println("[PUSH] begin failed");
+      return;
+    }
+  }
+
+  http.setTimeout(8000);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", String("Bearer ") + cloudApiKey);
+  http.addHeader("X-Device-Id", deviceId);
+  code = http.POST(body);
+  String resp = http.getString();
+  http.end();
+  Serial.printf("[PUSH] OS notify HTTP %d %s\n", code, resp.c_str());
+}
+
 /** After a successful ingest, pull latest GNB + softmax LR (no UI tap). */
 void autoPullModelsFromCloud() {
   if (WiFi.status() != WL_CONNECTED) return;
@@ -1705,6 +1792,16 @@ void handleStatus() {
   cloud["lrSource"] = lrModelSource;
   cloud["lrFromCloud"] = lrFromCloud;
 
+  JsonObject net = doc["network"].to<JsonObject>();
+  net["apIp"] = WiFi.softAPIP().toString();
+  net["apSsid"] = AP_SSID;
+  net["staConnected"] = WiFi.status() == WL_CONNECTED;
+  net["staIp"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
+  net["staSsid"] = staSsid;
+  net["wsPort"] = 81;
+  net["wsClients"] = alertWsClients;
+  net["pwa"] = true;
+
   JsonObject gnb = doc["gnb"].to<JsonObject>();
   gnb["sufficient"] = gnbSufficient;
   gnb["ready"] = gnbReady;
@@ -2048,6 +2145,28 @@ void setupWeb() {
       server.send(404, "text/plain", "Missing app.css");
     }
   });
+  server.on("/manifest.webmanifest", HTTP_GET, []() {
+    if (!serveFsFile("/manifest.webmanifest", "application/manifest+json")) {
+      server.send(404, "text/plain", "Missing manifest");
+    }
+  });
+  server.on("/sw.js", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "no-cache");
+    server.sendHeader("Service-Worker-Allowed", "/");
+    if (!serveFsFile("/sw.js", "application/javascript")) {
+      server.send(404, "text/plain", "Missing sw.js");
+    }
+  });
+  server.on("/icon-192.png", HTTP_GET, []() {
+    if (!serveFsFile("/icon-192.png", "image/png")) {
+      server.send(404, "text/plain", "Missing icon");
+    }
+  });
+  server.on("/icon-512.png", HTTP_GET, []() {
+    if (!serveFsFile("/icon-512.png", "image/png")) {
+      server.send(404, "text/plain", "Missing icon");
+    }
+  });
   server.on("/generate_204", HTTP_GET, handleCaptive);           // Android
   server.on("/hotspot-detect.html", HTTP_GET, handleCaptive);    // iOS
   server.on("/connecttest.txt", HTTP_GET, handleCaptive);        // Windows
@@ -2063,14 +2182,18 @@ void setupWeb() {
     if (path.endsWith(".html")) ctype = "text/html";
     else if (path.endsWith(".js")) ctype = "application/javascript";
     else if (path.endsWith(".css")) ctype = "text/css";
-    else if (path.endsWith(".json")) ctype = "application/json";
+    else if (path.endsWith(".json") || path.endsWith(".webmanifest")) ctype = "application/json";
+    else if (path.endsWith(".png")) ctype = "image/png";
     if (!serveFsFile(path, ctype)) {
       server.send(404, "text/plain", "Not found: " + path);
     }
   });
 
+  alertWs.begin();
+  alertWs.onEvent(onAlertWsEvent);
   server.begin();
   Serial.println("HTTP server started on port 80");
+  Serial.println("Alert WebSocket on port 81 (PWA multi-phone notify)");
 }
 
 void setup() {
@@ -2106,6 +2229,7 @@ void serveClientsFor(unsigned long ms) {
   while (millis() - start < ms) {
     dnsServer.processNextRequest();
     server.handleClient();
+    alertWs.loop();
     delay(2);
   }
 }

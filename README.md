@@ -2,9 +2,17 @@
 
 Early electrical heating / fire-risk detection on an **ESP32** node.
 
-The board reads **ACS712** (current) and **DS18B20** (temperature), derives heating features, scores risk with a threshold rule engine, and can override warnings with an on-device **Gaussian Naive Bayes** model once the labeled dataset is statistically sufficient. A SoftAP dashboard is served from LittleFS for phones and laptops — no cloud required. Labeled batch rows are **persisted on flash** so they survive power loss.
+The board reads **ACS712** (current) and **DS18B20** (temperature), derives heating features, and scores risk with:
 
-**Repository:** [github.com/sayan21m/fire-before-fire](https://github.com/sayan21m/fire-before-fire)
+1. A **threshold rule engine** (always on)
+2. On-device **Gaussian Naive Bayes** (local fit when the labeled dataset is sufficient)
+3. **Softmax logistic regression** (weights from `ml_model/` / LittleFS / cloud)
+4. A **confidence-weighted ensemble** of GNB + LR that can override rules
+
+A SoftAP dashboard is served from LittleFS for phones and laptops. Labeled batch rows **persist on flash**. With home Wi‑Fi saved once, the node **automatically** uploads data to Render and pulls updated models (prototype sync).
+
+**Repository:** [github.com/sayan21m/fire-before-fire](https://github.com/sayan21m/fire-before-fire)  
+**Cloud:** [fire-before-fire.onrender.com](https://fire-before-fire.onrender.com)
 
 ---
 
@@ -31,14 +39,16 @@ At idle with no load, **current ≈ 0 A** (and power/risk near zero) is expected
 ## Features
 
 - SoftAP Wi‑Fi (`FireBeforeFire` / `firebefore123`) → dashboard at `http://192.168.4.1`
+- **OS notifications** via HTTPS Web Push on Render (`/notify`); SoftAP also has in-app banner/beep alerts over WebSocket (port 81)
 - Live KPIs, sparklines, monitoring charts, alerts, event history, CSV/JSON export
 - Online/offline pill, theme toggle, auto-refresh, mobile-friendly layout
 - Nine-parameter threshold table (manual + adaptive, never below factory defaults)
 - Batch averaging (60 samples) → labeled `dataset[]` with target `0|1|2`
-- **Persists dataset** to LittleFS `/dataset.bin` across power cycles; reloads + refits GNB on boot
-- When the dataset reaches **100 rows**, uploads that full snapshot to a Render cloud API (needs home Wi‑Fi)
+- **Persists dataset** to LittleFS `/dataset.bin` across power cycles
+- **GNB + Softmax LR** predictions shown side-by-side; **ensemble** drives final ML override
+- Seeded `/softmax_logreg.json` on LittleFS; cloud can refresh GNB + LR
+- **Auto cloud sync** (after home Wi‑Fi is saved): upload from ~24+ rows every ~5 min, then pull models
 - Sensor health in `/api/status` (`sensors.tempOk`); UI banner when DS18B20 is missing
-- Gaussian NB fit when sufficiency score ≥ 6; overrides rules when confidence is high enough
 - Offline-capable UI (bundled Tailwind CSS; Plotly loads only if the client has internet)
 
 ---
@@ -66,7 +76,7 @@ fire_before_fire/
 
 ## Dataset persistence
 
-Labeled `dataset[]` rows (max 100) are written to LittleFS as `/dataset.bin` after every batch collapse and reloaded on boot (GNB refits from the saved rows). Settings → **Dataset on flash** shows whether a file is present.
+Labeled `dataset[]` rows (max 100) are written to LittleFS as `/dataset.bin` after every batch collapse and reloaded on boot (local GNB refits from the saved rows unless a cloud GNB was imported). Settings → **Dataset on flash** shows whether a file is present.
 
 | Action                         | Dataset on flash        |
 | ------------------------------ | ----------------------- |
@@ -74,46 +84,98 @@ Labeled `dataset[]` rows (max 100) are written to LittleFS as `/dataset.bin` aft
 | `pio run -t upload` (firmware) | **Kept**                |
 | `pio run -t uploadfs`          | **Wiped** (FS rewritten)|
 
+Also wiped by `uploadfs`: `/cloud_cfg.json`, `/gnb_model.json`, `/softmax_logreg.json` (re-seed LR from `data/softmax_logreg.json` on the next `uploadfs`).
+
 ---
 
-## Cloud upload (Render) — seed CSV + device retrain
+## Prediction pipeline
+
+1. Sample ACS712 + DS18B20 each loop (~1 s); if temp is disconnected, keep current live and flag fault
+2. Compute features (MA3, slopes, variance, power, temp acceleration)
+3. **Rules:** debounce threshold breaches → risk % + warnings
+4. Every **60** samples → batch average → append to `dataset[]` with `target` → **save `/dataset.bin`**
+5. If dataset is sufficient → **fit Gaussian NB** locally (8 features; `powerW` excluded)
+6. If Softmax LR weights are loaded → **predict LR** every loop
+7. **Ensemble:** confidence-weighted average of GNB + LR posteriors (agreement boost if both agree)
+8. If ensemble confidence ≥ 55% **and** ≥ rule confidence → **ensemble drives** status / warning banner
+
+SoftAP Bayesian page shows **GNB**, **LR**, and **ensemble** posteriors separately.
+
+---
+
+## Softmax LR training (`ml_model/`)
+
+Offline multiclass logistic regression with softmax + cross-entropy (NumPy):
+
+```bash
+cd ml_model
+pip install -r requirements.txt
+python pipeline.py --csv ../dataset/dataset_1.csv
+```
+
+Writes `ml_model/artifacts/` and syncs slim weights to:
+
+- `cloud/seed/softmax_logreg.json` (Render / ESP import)
+- `data/softmax_logreg.json` (LittleFS seed on `uploadfs`)
+
+---
+
+## Cloud (Render) — corpus GNB + hosted LR + auto device sync
 
 Default host: [https://fire-before-fire.onrender.com](https://fire-before-fire.onrender.com)
 
-**Training pipeline**
+**Server pipeline**
 
-1. On boot, the cloud service seeds a corpus from `cloud/seed/*.csv` (includes `dataset_1.csv`) and fits a global Gaussian NB.
-2. When the ESP dataset hits **100 rows**, it POSTs to `/api/ingest` — rows are **appended** to the corpus and the model is **refit**.
-3. SoftAP **Upload & import GNB** pulls `GET /api/devices/:id/model` (latest corpus model).
+1. Boot: seed corpus from `cloud/seed/*.csv`, fit global GNB; install `softmax_logreg.json`
+2. `POST /api/ingest`: append device rows → refit GNB
+3. `GET /api/devices/:id/model` / `.../logreg`: ESP pulls latest weights
 
-Local train / reset:
+**On the ESP (prototype auto-sync)**
+
+1. SoftAP → **Settings** → home Wi‑Fi + cloud URL/API key → **Save & connect** (once)
+2. SoftAP stays up; STA reaches Render in the background
+3. From **≥24** labeled rows, every **~5 minutes** (and on retries): upload dataset → pull GNB + LR  
+   Manual **Upload & import GNB** / **Import softmax LR** buttons remain as fallbacks
+
+Local cloud train:
 
 ```bash
 cd cloud
-npm run train              # seed + fit
+npm install
+npm run train              # seed + fit GNB
 npm run train:reset        # wipe corpus, re-seed, fit
-npm run train -- --csv ../dataset/dataset_1.csv
+npm start                  # local API on :3000
 ```
 
-SoftAP still works offline; **home Wi‑Fi** is configured on **Settings** (saved to `/cloud_cfg.json`).
+Render env `CLOUD_API_KEY` must match the device key (`cloud/.env` / Settings).
 
-1. Flash firmware + UI (`upload` / `uploadfs`)
-2. SoftAP dashboard → **Settings** → **Home Wi‑Fi & Cloud**
-3. Enter router SSID/password (cloud URL + API key are pre-filled)
-4. **Save & connect** — then auto-upload / **Upload & import GNB** can reach Render
+Also set on Render for **OS notifications** (Web Push):
 
-Render env `CLOUD_API_KEY` must match the device key (same as `cloud/.env`).
+```text
+VAPID_PUBLIC_KEY=…
+VAPID_PRIVATE_KEY=…
+VAPID_SUBJECT=mailto:you@example.com
+```
+
+Generate with `npx web-push generate-vapid-keys --json`. Subscribe phones at
+`https://fire-before-fire.onrender.com/notify?device=esp32-01` (HTTPS required —
+SoftAP HTTP cannot grant OS permission).
 
 | Method | Path | Auth | Description |
 | ------ | ---- | ---- | ----------- |
 | POST | `/api/ingest` | Bearer | Append device rows → refit GNB |
-| GET | `/api/devices/:id/model` | Bearer | Download latest GNB (ESP import) |
-| GET | `/api/devices/:id/logreg` | Bearer | Softmax LR weights (ESP import) |
+| GET | `/api/devices/:id/model` | Bearer | Download latest GNB |
+| GET | `/api/devices/:id/logreg` | Bearer | Download softmax LR |
+| POST | `/api/devices/:id/notify` | Bearer | ESP hazard → OS Web Push |
+| GET | `/api/push/vapid-public` | — | Public VAPID key for subscribe page |
+| POST | `/api/push/subscribe` | — | Store browser push subscription |
+| POST | `/api/push/test` | — | Send a test OS notification |
+| GET | `/notify` | — | HTTPS page to enable OS notifications |
 | GET | `/api/train/status` | Bearer | Corpus / seed / fit stats |
-| POST | `/api/train/refit` | Bearer | Force refit on current corpus |
-| GET/POST | `/api/cloud/config` | SoftAP | Read/save STA + cloud settings |
-| POST | `/api/cloud/import-gnb` | SoftAP | Upload local rows + pull model |
+| POST | `/api/train/refit` | Bearer | Force GNB refit |
 | GET | `/health` | — | Liveness |
+
+**Note:** Render free disks are ephemeral — seed CSVs/JSON reload on cold start; device uploads are re-learned after the next auto-sync.
 
 ---
 
@@ -125,7 +187,7 @@ Render env `CLOUD_API_KEY` must match the device key (same as `cloud/.env`).
 pio run -t upload --upload-port /dev/cu.usbserial-0001
 ```
 
-Use the real USB-serial port (not Bluetooth earbuds / debug-console aliases). Close Serial Monitor if the port is busy.
+Use the real USB-serial port. Close Serial Monitor if the port is busy.
 
 ### 2. Build CSS (when you change styles)
 
@@ -139,56 +201,54 @@ npx --yes tailwindcss@3.4.17 -i ./src-css/input.css -o ./data/app.css --minify
 pio run -t uploadfs --upload-port /dev/cu.usbserial-0001
 ```
 
-Note: this rewrites LittleFS and clears `/dataset.bin`.
+Rewrites LittleFS (clears `/dataset.bin` and saved cloud config).
 
 ### 4. Open the dashboard
 
 1. Join Wi‑Fi **FireBeforeFire** (password `firebefore123`)
 2. Ignore “no internet” on the phone
 3. Open **http://192.168.4.1**
-4. Hard-refresh if the UI looks stale after `uploadfs`
+4. **Settings** → home Wi‑Fi → **Save & connect** (for auto cloud sync)
+5. **Settings** → home Wi‑Fi → **Save & connect** (for auto cloud sync)
+6. **Settings → App & phone notifications** → **Enable OS notifications** (opens HTTPS `/notify` on Render; leave SoftAP first) + optional in-app alerts / Install app  
+   Other phones on home Wi‑Fi: open the **LAN URL** shown there (ESP STA IP)
+7. Hard-refresh if the UI looks stale after `uploadfs`
 
 Serial tips:
 
 - `[AP] clients=N` — a client is on the SoftAP
 - `DS18B20 devices found: N` — `0` means check GPIO 4 wiring / pull-up
 - `[FS] saved dataset` / `loaded dataset` — persistence is working
-
-Optional STA (home Wi‑Fi) can be set via `STA_SSID` / `STA_PASS` in `src/main.cpp` so a laptop can keep internet while still reaching the SoftAP dashboard.
-
----
-
-## HTTP API
-
-| Method   | Path              | Description                                                          |
-| -------- | ----------------- | -------------------------------------------------------------------- |
-| GET      | `/api/status`     | Live features, `sensors`, `persist`, thresholds, warnings, GNB state |
-| GET      | `/api/dataset`    | Labeled dataset rows                                                 |
-| GET      | `/api/gnb`        | Sufficiency / model / confidence                                     |
-| GET/POST | `/api/thresholds` | Read / update warn–critical table                                    |
-| POST     | `/api/adaptive`   | Enable adaptive thresholds                                           |
-| POST     | `/api/defaults`   | Restore factory thresholds                                           |
-| GET      | `/api/alerts`     | Recent alert log                                                     |
+- `[GNB]` / `[LR]` / `[ENS]` — per-model and ensemble decisions
+- `[CLOUD]` — auto upload / model pull
+- `[PUSH]` — OS Web Push notify to cloud
+- `[PWA]` — WebSocket alert broadcast to connected phones
 
 ---
 
-## Prediction pipeline
+## SoftAP HTTP API
 
-1. Sample ACS712 + DS18B20 each loop (~1 s); if temp is disconnected, keep current live and flag fault
-2. Compute features (MA3, slopes, variance, power, temp acceleration)
-3. **Rules:** debounce threshold breaches → risk % + warnings
-4. Every **60** samples → batch average → append to `dataset[]` with `target` → **save `/dataset.bin`**
-5. If dataset is sufficient → **fit Gaussian NB** (8 features; `powerW` excluded)
-6. If NB confidence ≥ 60% **and** ≥ rule confidence → **NB drives** the warning banner
+| Method   | Path                       | Description |
+| -------- | -------------------------- | ----------- |
+| GET      | `/api/status`              | Live features, `sensors`, `persist`, `cloud`, `gnb`, `logreg`, `ensemble` |
+| GET      | `/api/dataset`             | Labeled dataset rows |
+| GET      | `/api/gnb`                 | GNB sufficiency / model / confidence |
+| GET/POST | `/api/cloud/config`        | STA + cloud settings |
+| POST     | `/api/cloud/import-gnb`    | Manual GNB pull |
+| POST     | `/api/cloud/import-logreg` | Manual LR pull |
+| GET/POST | `/api/thresholds`          | Read / update warn–critical table |
+| POST     | `/api/adaptive`            | Enable adaptive thresholds |
+| POST     | `/api/defaults`            | Restore factory thresholds |
+| GET      | `/api/alerts`              | Recent alert log |
 
 ---
 
 ## Contributors
 
-| Contributor       | GitHub / focus                                            | Highlights                                                                            |
-| ----------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Sayan Garai**   | [`sayan21m`](https://github.com/sayan21m) · `hardware-sg` | Project init, ESP32 firmware, SoftAP APIs, GNB, live UI, dataset persist, PR #1       |
-| **Soumili Hazra** | [`soumili122004`](https://github.com/soumili122004) · `software-sh`                                             | Initial HTML dashboard structure and frontend scaffolding; later merge / cleanup PRs  |
+| Contributor       | GitHub / focus                                            | Highlights |
+| ----------------- | --------------------------------------------------------- | ---------- |
+| **Sayan Garai**   | [`sayan21m`](https://github.com/sayan21m) · `hardware-sg` | Firmware, SoftAP APIs, GNB/LR ensemble, persist, cloud sync, UI |
+| **Soumili Hazra** | [`soumili122004`](https://github.com/soumili122004) · `software-sh` | Initial HTML dashboard scaffolding; later merge / cleanup PRs |
 
 See [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md) for contribution stats and design notes.
 

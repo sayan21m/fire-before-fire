@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0B1220" />
+    <title>Fire Before Fire — OS notifications</title>
+    <link rel="manifest" href="/notify-manifest.webmanifest" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b1220;
+        --card: #151f30;
+        --ink: #f1f5f9;
+        --muted: #94a3b8;
+        --accent: #3b82f6;
+        --ok: #34d399;
+        --bad: #f87171;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        background: radial-gradient(1200px 600px at 20% -10%, #1e293b, var(--bg));
+        color: var(--ink);
+        display: grid;
+        place-items: center;
+        padding: 1.25rem;
+      }
+      .card {
+        width: min(28rem, 100%);
+        background: color-mix(in srgb, var(--card) 92%, transparent);
+        border: 1px solid #334155;
+        border-radius: 1rem;
+        padding: 1.25rem 1.35rem;
+        box-shadow: 0 20px 50px rgba(0,0,0,.35);
+      }
+      h1 { font-size: 1.25rem; margin: 0 0 .35rem; }
+      p { color: var(--muted); font-size: .92rem; line-height: 1.45; margin: 0 0 .9rem; }
+      label { display: block; font-size: .75rem; color: var(--muted); margin-bottom: .35rem; }
+      input {
+        width: 100%;
+        border-radius: .65rem;
+        border: 1px solid #334155;
+        background: #0f172a;
+        color: var(--ink);
+        padding: .7rem .8rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin-bottom: 1rem;
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: .7rem;
+        padding: .85rem 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--accent);
+        color: white;
+      }
+      button.secondary {
+        margin-top: .55rem;
+        background: transparent;
+        border: 1px solid #334155;
+        color: var(--ink);
+      }
+      #status { margin-top: 1rem; font-size: .85rem; color: var(--muted); }
+      #status.ok { color: var(--ok); }
+      #status.bad { color: var(--bad); }
+      .note { font-size: .78rem; color: var(--muted); margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Enable OS notifications</h1>
+      <p>
+        This page is served over <strong>HTTPS</strong>, so your phone can grant
+        real system notifications. SoftAP
+        <code>http://192.168.4.1</code> cannot — browsers block that.
+      </p>
+      <label for="deviceId">Device ID (must match ESP Settings)</label>
+      <input id="deviceId" value="esp32-01" autocomplete="off" />
+      <button id="btn-enable" type="button">Allow OS notifications</button>
+      <button id="btn-test" class="secondary" type="button">Send test notification</button>
+      <div id="status">Waiting…</div>
+      <p class="note">
+        Keep this subscription after enabling. When the ESP detects a hazard and
+        is on home Wi‑Fi, it tells the cloud, which pushes an OS notification to
+        every subscribed phone.
+      </p>
+    </main>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const deviceInput = document.getElementById("deviceId");
+      const statusEl = document.getElementById("status");
+      if (params.get("device")) deviceInput.value = params.get("device");
+
+      function setStatus(msg, ok) {
+        statusEl.textContent = msg;
+        statusEl.className = ok === true ? "ok" : ok === false ? "bad" : "";
+      }
+
+      function urlBase64ToUint8Array(base64String) {
+        const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+        const raw = atob(base64);
+        const out = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+        return out;
+      }
+
+      async function getPublicKey() {
+        const res = await fetch("/api/push/vapid-public");
+        const data = await res.json();
+        if (!data.ok || !data.publicKey) throw new Error(data.error || "No VAPID public key");
+        return data.publicKey;
+      }
+
+      async function ensureSw() {
+        if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+          throw new Error("This browser does not support Web Push");
+        }
+        return navigator.serviceWorker.register("/notify-sw.js", { scope: "/" });
+      }
+
+      async function enable() {
+        try {
+          setStatus("Requesting permission…");
+          const perm = await Notification.requestPermission();
+          if (perm !== "granted") {
+            setStatus("Permission denied in browser settings", false);
+            return;
+          }
+          const reg = await ensureSw();
+          await navigator.serviceWorker.ready;
+          const publicKey = await getPublicKey();
+          let sub = await reg.pushManager.getSubscription();
+          if (!sub) {
+            sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(publicKey),
+            });
+          }
+          const res = await fetch("/api/push/subscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              deviceId: deviceInput.value.trim() || "esp32-01",
+              subscription: sub.toJSON(),
+              userAgent: navigator.userAgent,
+            }),
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "subscribe failed");
+          localStorage.setItem("fbf_os_notify", "1");
+          setStatus("OS notifications enabled for " + (deviceInput.value || "esp32-01"), true);
+          new Notification("Fire Before Fire", {
+            body: "OS notifications are on for this phone",
+            icon: "/icon-192.png",
+          });
+        } catch (e) {
+          setStatus(String(e.message || e), false);
+        }
+      }
+
+      async function testPush() {
+        try {
+          const res = await fetch("/api/push/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ deviceId: deviceInput.value.trim() || "esp32-01" }),
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "test failed");
+          setStatus("Test sent to " + data.sent + " subscriber(s)", true);
+        } catch (e) {
+          setStatus(String(e.message || e), false);
+        }
+      }
+
+      document.getElementById("btn-enable").addEventListener("click", enable);
+      document.getElementById("btn-test").addEventListener("click", testPush);
+      setStatus(
+        window.isSecureContext
+          ? "Ready — tap Allow OS notifications"
+          : "Needs HTTPS (open the Render URL, not SoftAP)",
+        window.isSecureContext,
+      );
+    </script>
+  </body>
+</html>
