@@ -47,21 +47,19 @@ At idle with no load, **current ≈ 0 A** (and power/risk near zero) is expected
 
 ```
 fire_before_fire/
-├── platformio.ini          # ESP32 + LittleFS + libs
-├── src/main.cpp            # Sensors, prediction, SoftAP, dataset persist
-├── data/                   # SoftAP UI (LittleFS)
-│   ├── index.html
-│   ├── scripts.js
-│   └── app.css
-├── dataset/                # Offline labeled CSVs (source)
-├── cloud/
-│   ├── server.js           # Render API: ingest → corpus → refit GNB
-│   ├── train.js            # CLI: npm run train / train:reset
-│   ├── seed/dataset_1.csv  # Boot seed for cloud GNB
-│   └── lib/                # gnb.js + pipeline.js
-├── src-css/input.css       # Tailwind source
+├── platformio.ini
+├── src/main.cpp              # Firmware: sensors, rules, GNB+LR ensemble, SoftAP, auto cloud sync
+├── data/                     # LittleFS UI (+ seeded softmax_logreg.json)
+├── dataset/dataset_1.csv     # Offline labeled training CSV
+├── ml_model/                 # Softmax logistic regression train pipeline (Python)
+├── cloud/                    # Render ingest + GNB corpus + model hosting
+│   ├── server.js
+│   ├── train.js
+│   ├── seed/                 # dataset_1.csv + softmax_logreg.json
+│   └── lib/
+├── src-css/input.css         # Tailwind source → data/app.css
 ├── docs/PROJECT_REPORT.md
-└── README.md
+└── render.yaml
 ```
 
 ---
@@ -110,6 +108,7 @@ Render env `CLOUD_API_KEY` must match the device key (same as `cloud/.env`).
 | ------ | ---- | ---- | ----------- |
 | POST | `/api/ingest` | Bearer | Append device rows → refit GNB |
 | GET | `/api/devices/:id/model` | Bearer | Download latest GNB (ESP import) |
+| GET | `/api/devices/:id/logreg` | Bearer | Softmax LR weights (ESP import) |
 | GET | `/api/train/status` | Bearer | Corpus / seed / fit stats |
 | POST | `/api/train/refit` | Bearer | Force refit on current corpus |
 | GET/POST | `/api/cloud/config` | SoftAP | Read/save STA + cloud settings |

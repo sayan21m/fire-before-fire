@@ -1133,6 +1133,14 @@
                       Upload & import GNB
                     </button>
                     <button
+                      id="btn-import-logreg-cloud"
+                      type="button"
+                      class="rounded-lg border border-accent/40 bg-accent-soft px-3 py-1.5 text-xs text-accent-muted hover:bg-accent/20 transition"
+                      title="Download softmax logistic regression from Render (needs STA Wi‑Fi)"
+                    >
+                      Import softmax LR
+                    </button>
+                    <button
                       id="btn-export-dataset-csv"
                       type="button"
                       class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
@@ -1152,10 +1160,35 @@
                 </div>
               </div>
 
+              <div class="grid grid-cols-1 gap-4 md:grid-cols-2 mb-5">
+                <div class="glass rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    Gaussian NB
+                  </p>
+                  <p id="ml-gnb-pred" class="mt-1 font-mono text-xl text-ink">
+                    —
+                  </p>
+                  <p id="ml-gnb-detail" class="mt-1 text-xs text-ink-dim font-mono">
+                    conf — · post —
+                  </p>
+                </div>
+                <div class="glass rounded-xl p-4">
+                  <p class="text-[10px] uppercase tracking-wider text-ink-dim">
+                    Softmax LR
+                  </p>
+                  <p id="ml-lr-pred" class="mt-1 font-mono text-xl text-ink">
+                    —
+                  </p>
+                  <p id="ml-lr-detail" class="mt-1 text-xs text-ink-dim font-mono">
+                    conf — · post —
+                  </p>
+                </div>
+              </div>
+
               <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 mb-5">
                 <div class="glass glass-hover rounded-2xl p-5 shadow-glass">
                   <p class="text-[11px] uppercase tracking-wider text-ink-dim">
-                    P(OK)
+                    Ensemble P(OK)
                   </p>
                   <p
                     id="bayes-p-ok"
@@ -1175,7 +1208,7 @@
                 </div>
                 <div class="glass glass-hover rounded-2xl p-5 shadow-glass">
                   <p class="text-[11px] uppercase tracking-wider text-ink-dim">
-                    P(Warn) + P(Critical)
+                    Ensemble P(Warn) + P(Critical)
                   </p>
                   <p
                     id="bayes-p-hazard"
@@ -1199,7 +1232,7 @@
                   <p
                     class="text-[11px] uppercase tracking-wider text-ink-dim mb-3"
                   >
-                    NB Confidence
+                    Ensemble Confidence
                   </p>
                   <div
                     id="bayes-gauge"
@@ -1710,15 +1743,10 @@
                     Home Wi‑Fi &amp; Cloud
                   </h3>
                   <p class="text-xs text-ink-dim mb-4">
-                    SoftAP stays local. Enter home Wi‑Fi so the ESP can reach
-                    <a
-                      class="text-accent-muted underline"
-                      href="https://fire-before-fire.onrender.com"
-                      target="_blank"
-                      rel="noopener"
-                      >fire-before-fire.onrender.com</a
-                    >
-                    when the dataset hits 100 rows.
+                    SoftAP stays local. Save home Wi‑Fi once — the ESP then
+                    <strong class="text-ink-muted font-medium">automatically</strong>
+                    uploads labeled rows (from ~24+) every ~5 minutes and pulls
+                    updated GNB + softmax LR models. No import button required.
                   </p>
                   <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <label class="block">

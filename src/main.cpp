@@ -26,7 +26,9 @@
 #define DEFAULT_CLOUD_API_KEY "12firebeforefire24"
 #define DEFAULT_DEVICE_ID "esp32-01"
 #define CLOUD_CFG_PATH "/cloud_cfg.json"
-#define CLOUD_RETRY_MS 120000UL  // retry failed upload every 2 min while pending
+#define CLOUD_RETRY_MS 60000UL           // retry failed upload every 1 min
+#define CLOUD_UPLOAD_INTERVAL_MS 300000UL // re-send dataset every 5 min while STA up
+#define CLOUD_MIN_UPLOAD_ROWS 24         // don't wait for full 100 on prototype
 
 char staSsid[64] = "";
 char staPass[64] = "";
@@ -113,17 +115,22 @@ Features dataset[MAX_DATASET];
 int datasetCount = 0;
 bool datasetDirty = false;
 
-bool cloudUploadPending = false;   // set when dataset first reaches 100 rows
-bool cloudUploadDone = false;      // success this fill cycle
+bool cloudUploadPending = false;   // set when dataset ready / interval due
+bool cloudUploadDone = false;      // last attempt succeeded
 unsigned long cloudLastAttemptMs = 0;
+unsigned long cloudLastSuccessMs = 0;
 int cloudLastHttp = 0;
 char cloudStatusMsg[64] = "idle";
 bool gnbFromCloud = false;
 char gnbModelSource[16] = "none";  // none | local | cloud
 
 #define GNB_MODEL_PATH "/gnb_model.json"
+#define LR_MODEL_PATH "/softmax_logreg.json"
 
 void appendFeatureRow(JsonObject row, const Features &f);
+bool tryImportGnbFromCloud();
+bool tryImportLogregFromCloud();
+void connectStaIfConfigured();
 
 // ── Gaussian Naive Bayes pipeline ──────────────────────────────────
 // Features used for GNB (skip powerW — algebraically = 230*|I|)
@@ -134,6 +141,8 @@ void appendFeatureRow(JsonObject row, const Features &f);
 #define GNB_MIN_CLASSES 2
 #define GNB_CONF_MIN 0.60f      // absolute floor to trust NB
 #define GNB_VAR_FLOOR 1e-6f
+#define LR_CONF_MIN 0.55f
+#define ENS_CONF_MIN 0.55f      // ensemble override floor
 
 float gnbMean[GNB_CLASSES][GNB_FEATS];
 float gnbVar[GNB_CLASSES][GNB_FEATS];
@@ -150,6 +159,31 @@ float gnbConfidence = 0.0f;
 float ruleConfidence = 0.0f;
 char gnbStatusMsg[64] = "collecting data";
 int8_t gnbPrevPred = 0;
+
+// Softmax logistic regression (ml_model → LittleFS / cloud import)
+float lrW[GNB_FEATS][GNB_CLASSES];
+float lrB[GNB_CLASSES];
+float lrMean[GNB_FEATS];
+float lrStd[GNB_FEATS];
+float lrPost[GNB_CLASSES];
+bool lrReady = false;
+bool lrActive = false;
+bool lrFromCloud = false;
+int8_t lrPredClass = 0;
+float lrConfidence = 0.0f;
+int8_t lrPrevPred = 0;
+char lrStatusMsg[64] = "no logreg model";
+char lrModelSource[16] = "none";  // none | flash | cloud
+
+// Softmax + GNB ensemble (confidence-weighted posterior average)
+float ensPost[GNB_CLASSES];
+int8_t ensPredClass = 0;
+float ensConfidence = 0.0f;
+bool ensActive = false;
+int ensModelsUsed = 0;
+int8_t ensPrevPred = 0;
+bool ensAgree = false;  // GNB and LR same class when both ready
+char ensStatusMsg[64] = "no ML models";
 
 // ── Prediction parameters (importance ★ = weight) ──────────────────
 enum ParamId {
@@ -431,40 +465,201 @@ int8_t predictGaussianNB(const Features &f) {
   return best;
 }
 
-void applyGnbOverrideIfConfident() {
-  gnbActive = false;
-  if (!gnbReady) return;
+bool applyLogregModelFromDoc(JsonDocument &doc) {
+  const char *type = doc["type"] | "";
+  int ver = doc["version"] | 0;
+  int nFeat = doc["n_features"] | 0;
+  int nClass = doc["n_classes"] | 0;
+  if (ver != 1 || nFeat != GNB_FEATS || nClass != GNB_CLASSES) {
+    Serial.printf("[LR] bad header ver=%d feats=%d classes=%d\n", ver, nFeat, nClass);
+    return false;
+  }
+  if (type[0] && strcmp(type, "softmax_logistic_regression") != 0) {
+    Serial.printf("[LR] unexpected type %s\n", type);
+    return false;
+  }
+  JsonArray mean = doc["mean"].as<JsonArray>();
+  JsonArray stdv = doc["std"].as<JsonArray>();
+  JsonArray W = doc["W"].as<JsonArray>();
+  JsonArray b = doc["b"].as<JsonArray>();
+  if (mean.isNull() || stdv.isNull() || W.isNull() || b.isNull()) return false;
+  if (mean.size() < GNB_FEATS || stdv.size() < GNB_FEATS ||
+      W.size() < GNB_FEATS || b.size() < GNB_CLASSES) {
+    return false;
+  }
 
-  // Use NB when confidence beats both the floor and the rule-engine confidence
-  if (gnbConfidence >= GNB_CONF_MIN && gnbConfidence >= ruleConfidence) {
-    gnbActive = true;
-    if (gnbPredClass >= 2) {
+  for (int j = 0; j < GNB_FEATS; j++) {
+    lrMean[j] = mean[j] | 0.0f;
+    float s = stdv[j] | 1.0f;
+    lrStd[j] = (s < 1e-8f) ? 1.0f : s;
+    JsonArray row = W[j].as<JsonArray>();
+    if (row.isNull() || row.size() < GNB_CLASSES) return false;
+    for (int c = 0; c < GNB_CLASSES; c++) lrW[j][c] = row[c] | 0.0f;
+  }
+  for (int c = 0; c < GNB_CLASSES; c++) lrB[c] = b[c] | 0.0f;
+
+  lrReady = true;
+  snprintf(lrStatusMsg, sizeof(lrStatusMsg), "logreg ready");
+  Serial.println("[LR] softmax logistic regression model applied");
+  return true;
+}
+
+bool saveLogregModelToFs(const String &json) {
+  File f = LittleFS.open(LR_MODEL_PATH, "w");
+  if (!f) return false;
+  size_t n = f.print(json);
+  f.close();
+  return n == json.length();
+}
+
+bool loadLogregModelFromFs() {
+  if (!LittleFS.exists(LR_MODEL_PATH)) return false;
+  File f = LittleFS.open(LR_MODEL_PATH, "r");
+  if (!f) return false;
+  String json = f.readString();
+  f.close();
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, json);
+  if (err) {
+    Serial.printf("[LR] model file parse error: %s\n", err.c_str());
+    return false;
+  }
+  if (!applyLogregModelFromDoc(doc)) return false;
+  lrFromCloud = false;
+  strncpy(lrModelSource, "flash", sizeof(lrModelSource) - 1);
+  snprintf(lrStatusMsg, sizeof(lrStatusMsg), "loaded from flash");
+  return true;
+}
+
+int8_t predictSoftmaxLogreg(const Features &f) {
+  float x[GNB_FEATS];
+  gnbFillFeatures(f, x);
+
+  float z[GNB_CLASSES];
+  float maxZ = -1e30f;
+  for (int c = 0; c < GNB_CLASSES; c++) {
+    float logit = lrB[c];
+    for (int j = 0; j < GNB_FEATS; j++) {
+      float xn = (x[j] - lrMean[j]) / lrStd[j];
+      logit += xn * lrW[j][c];
+    }
+    z[c] = logit;
+    if (logit > maxZ) maxZ = logit;
+  }
+
+  float sum = 0.0f;
+  for (int c = 0; c < GNB_CLASSES; c++) {
+    lrPost[c] = expf(z[c] - maxZ);
+    sum += lrPost[c];
+  }
+  if (sum < 1e-12f) sum = 1e-12f;
+  for (int c = 0; c < GNB_CLASSES; c++) lrPost[c] /= sum;
+
+  int8_t best = 0;
+  float bestP = lrPost[0];
+  for (int c = 1; c < GNB_CLASSES; c++) {
+    if (lrPost[c] > bestP) {
+      bestP = lrPost[c];
+      best = (int8_t)c;
+    }
+  }
+  lrPredClass = best;
+  lrConfidence = bestP;
+  return best;
+}
+
+void applyEnsembleOverrideIfConfident() {
+  ensActive = false;
+  ensModelsUsed = 0;
+  ensAgree = false;
+  memset(ensPost, 0, sizeof(ensPost));
+
+  // Confidence-weighted average of class posteriors from ready models.
+  float wSum = 0.0f;
+  if (gnbReady) {
+    float w = gnbConfidence;
+    if (w < 0.05f) w = 0.05f;
+    for (int c = 0; c < GNB_CLASSES; c++) ensPost[c] += w * gnbPost[c];
+    wSum += w;
+    ensModelsUsed++;
+  }
+  if (lrReady) {
+    float w = lrConfidence;
+    if (w < 0.05f) w = 0.05f;
+    for (int c = 0; c < GNB_CLASSES; c++) ensPost[c] += w * lrPost[c];
+    wSum += w;
+    ensModelsUsed++;
+  }
+
+  if (ensModelsUsed == 0 || wSum < 1e-12f) {
+    gnbActive = false;
+    lrActive = false;
+    ensConfidence = 0.0f;
+    ensPredClass = 0;
+    snprintf(ensStatusMsg, sizeof(ensStatusMsg), "no ML models");
+    return;
+  }
+
+  for (int c = 0; c < GNB_CLASSES; c++) ensPost[c] /= wSum;
+
+  int8_t best = 0;
+  float bestP = ensPost[0];
+  for (int c = 1; c < GNB_CLASSES; c++) {
+    if (ensPost[c] > bestP) {
+      bestP = ensPost[c];
+      best = (int8_t)c;
+    }
+  }
+  ensPredClass = best;
+  ensConfidence = bestP;
+
+  if (gnbReady && lrReady) {
+    ensAgree = (gnbPredClass == lrPredClass);
+    if (ensAgree) ensConfidence = fminf(1.0f, ensConfidence * 1.08f);
+  }
+
+  // Both models stay "active" for UI whenever they contributed a prediction
+  gnbActive = gnbReady;
+  lrActive = lrReady;
+
+  if (ensModelsUsed >= 2) {
+    snprintf(ensStatusMsg, sizeof(ensStatusMsg),
+             ensAgree ? "ensemble agree · GNB+LR" : "ensemble mix · GNB+LR");
+  } else if (gnbReady) {
+    snprintf(ensStatusMsg, sizeof(ensStatusMsg), "ensemble · GNB only");
+  } else {
+    snprintf(ensStatusMsg, sizeof(ensStatusMsg), "ensemble · LR only");
+  }
+
+  if (ensConfidence >= ENS_CONF_MIN && ensConfidence >= ruleConfidence) {
+    ensActive = true;
+    if (ensPredClass >= 2) {
       overallStatus = "danger";
-      riskPercent = 55.0f + gnbPost[2] * 45.0f;
-    } else if (gnbPredClass == 1) {
+      riskPercent = 55.0f + ensPost[2] * 45.0f;
+    } else if (ensPredClass == 1) {
       overallStatus = "caution";
-      riskPercent = 25.0f + gnbPost[1] * 30.0f;
+      riskPercent = 25.0f + ensPost[1] * 30.0f;
     } else {
       overallStatus = "ok";
-      riskPercent = (1.0f - gnbPost[0]) * 20.0f;
+      riskPercent = (1.0f - ensPost[0]) * 20.0f;
     }
 
-    // Replace rule warnings with a single GNB prediction banner
     warningCount = 0;
-    if (gnbPredClass >= 1 && warningCount < MAX_WARNINGS) {
+    if (ensPredClass >= 1 && warningCount < MAX_WARNINGS) {
       Warning &w = warnings[warningCount++];
-      strncpy(w.param, "gnb", sizeof(w.param) - 1);
+      strncpy(w.param, "ensemble", sizeof(w.param) - 1);
       w.param[sizeof(w.param) - 1] = '\0';
-      strncpy(w.label, "Gaussian NB prediction", sizeof(w.label) - 1);
+      strncpy(w.label, ensModelsUsed >= 2 ? "Ensemble (GNB+LR)" : "Ensemble ML",
+              sizeof(w.label) - 1);
       w.label[sizeof(w.label) - 1] = '\0';
-      strncpy(w.level, gnbPredClass >= 2 ? "critical" : "warn", sizeof(w.level) - 1);
+      strncpy(w.level, ensPredClass >= 2 ? "critical" : "warn", sizeof(w.level) - 1);
       w.level[sizeof(w.level) - 1] = '\0';
-      w.value = gnbConfidence * 100.0f;
-      w.threshold = GNB_CONF_MIN * 100.0f;
+      w.value = ensConfidence * 100.0f;
+      w.threshold = ENS_CONF_MIN * 100.0f;
       w.ms = millis();
-      if (gnbPredClass > gnbPrevPred) pushAlert(w);
+      if (ensPredClass > ensPrevPred) pushAlert(w);
     }
-    gnbPrevPred = gnbPredClass;
+    ensPrevPred = ensPredClass;
   }
 }
 
@@ -526,15 +721,22 @@ void evaluatePrediction(const Features &f) {
 
   ruleConfidence = totalW > 0 ? (weighted / totalW) : 0.0f;
 
-  // Pipeline: if dataset is statistically sufficient and NB is confident, override rules
+  // Always score GNB + LR when ready, then fuse with confidence-weighted ensemble
   if (gnbReady) {
     predictGaussianNB(f);
-    applyGnbOverrideIfConfident();
   } else {
-    gnbActive = false;
     gnbConfidence = 0.0f;
     gnbPredClass = 0;
+    memset(gnbPost, 0, sizeof(gnbPost));
   }
+  if (lrReady) {
+    predictSoftmaxLogreg(f);
+  } else {
+    lrConfidence = 0.0f;
+    lrPredClass = 0;
+    memset(lrPost, 0, sizeof(lrPost));
+  }
+  applyEnsembleOverrideIfConfident();
 }
 
 // Adaptive: never drop below fire-safe defaults (prevents noise-trained false alarms)
@@ -761,11 +963,11 @@ bool loadDatasetFromFs() {
     hasBatchAvg = true;
   }
   Serial.printf("[FS] loaded dataset (%d rows) from %s\n", datasetCount, DATASET_PATH);
-  // If flash already has a full dataset, queue one Render upload when STA is online
-  if (datasetCount >= MAX_DATASET && strlen(cloudBaseUrl) > 0) {
+  // If flash already has enough rows, queue auto cloud sync when STA is online
+  if (datasetCount >= CLOUD_MIN_UPLOAD_ROWS && strlen(cloudBaseUrl) > 0) {
     cloudUploadPending = true;
     cloudUploadDone = false;
-    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "queued (full on boot)");
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "queued (boot %d rows)", datasetCount);
   }
   return true;
 }
@@ -909,6 +1111,10 @@ void handlePostCloudConfig() {
   bool saved = saveCloudConfigToFs();
   connectStaIfConfigured();
   bool staOk = waitStaConnected(3500);
+  if (datasetCount >= CLOUD_MIN_UPLOAD_ROWS) {
+    cloudUploadPending = true;
+    cloudUploadDone = false;
+  }
 
   JsonDocument ok;
   ok["ok"] = saved;
@@ -995,23 +1201,77 @@ bool tryUploadFullDatasetToCloud(bool force = false) {
   if (code >= 200 && code < 300) {
     cloudUploadPending = false;
     cloudUploadDone = true;
+    cloudLastSuccessMs = millis();
     snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "uploaded HTTP %d", code);
     Serial.printf("[CLOUD] OK %d %s\n", code, resp.c_str());
     return true;
   }
 
+  cloudUploadDone = false;
   snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "fail HTTP %d", code);
   Serial.printf("[CLOUD] fail %d %s\n", code, resp.c_str());
   return false;
 }
 
-void maybeCloudUpload() {
-  if (!cloudUploadPending || cloudUploadDone) return;
+/** After a successful ingest, pull latest GNB + softmax LR (no UI tap). */
+void autoPullModelsFromCloud() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  Serial.println("[CLOUD] auto-pull GNB + logreg…");
+  if (tryImportGnbFromCloud()) {
+    Serial.println("[CLOUD] auto GNB import OK");
+  } else {
+    Serial.printf("[CLOUD] auto GNB import skip: %s\n", cloudStatusMsg);
+  }
+  if (tryImportLogregFromCloud()) {
+    Serial.println("[CLOUD] auto logreg import OK");
+  } else {
+    Serial.printf("[CLOUD] auto logreg import skip: %s\n", cloudStatusMsg);
+  }
+}
+
+void maybeCloudSync() {
   if (!cloudConfigured()) return;
-  if (datasetCount < MAX_DATASET) return;
+
+  // Keep trying STA so upload can run without opening SoftAP again
+  if (WiFi.status() != WL_CONNECTED) {
+    static unsigned long lastStaTry = 0;
+    unsigned long now = millis();
+    if (!lastStaTry || (now - lastStaTry) > 30000UL) {
+      lastStaTry = now;
+      connectStaIfConfigured();
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "waiting Wi‑Fi");
+    }
+    return;
+  }
+
+  if (datasetCount < CLOUD_MIN_UPLOAD_ROWS) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg),
+             "waiting rows (%d/%d)", datasetCount, CLOUD_MIN_UPLOAD_ROWS);
+    return;
+  }
+
   unsigned long now = millis();
-  if (cloudLastAttemptMs && (now - cloudLastAttemptMs) < CLOUD_RETRY_MS) return;
-  tryUploadFullDatasetToCloud();
+  bool intervalDue =
+      !cloudLastSuccessMs ||
+      (now - cloudLastSuccessMs) >= CLOUD_UPLOAD_INTERVAL_MS;
+  bool retryDue =
+      cloudUploadPending &&
+      (!cloudLastAttemptMs || (now - cloudLastAttemptMs) >= CLOUD_RETRY_MS);
+
+  if (!intervalDue && !retryDue && cloudUploadDone) return;
+  if (cloudLastAttemptMs && (now - cloudLastAttemptMs) < CLOUD_RETRY_MS &&
+      !cloudUploadDone) {
+    return;  // still in backoff after a failure
+  }
+  if (cloudLastAttemptMs && (now - cloudLastAttemptMs) < 15000UL) return;  // debounce
+
+  cloudUploadPending = true;
+  bool ok = tryUploadFullDatasetToCloud(true);
+  if (ok) {
+    autoPullModelsFromCloud();
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "synced · next ~%lum",
+             (unsigned long)(CLOUD_UPLOAD_INTERVAL_MS / 60000UL));
+  }
 }
 
 bool applyGnbModelFromDoc(JsonDocument &doc) {
@@ -1206,6 +1466,102 @@ void handleImportGnb() {
   server.send(200, "application/json", out);
 }
 
+bool tryImportLogregFromCloud() {
+  if (!cloudConfigured()) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import: cloud disabled");
+    return false;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import: waiting Wi‑Fi");
+    return false;
+  }
+
+  String url = String(cloudBaseUrl) + "/api/devices/" + deviceId + "/logreg";
+  bool useTls = strncmp(cloudBaseUrl, "https://", 8) == 0;
+  HTTPClient http;
+  WiFiClientSecure secure;
+  snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "importing logreg…");
+  Serial.printf("[CLOUD] GET logreg %s\n", url.c_str());
+
+  if (useTls) {
+    secure.setInsecure();
+    if (!http.begin(secure, url)) {
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
+      return false;
+    }
+  } else {
+    if (!http.begin(url)) {
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
+      return false;
+    }
+  }
+
+  http.setTimeout(12000);
+  http.addHeader("Authorization", String("Bearer ") + cloudApiKey);
+  http.addHeader("X-Device-Id", deviceId);
+  int code = http.GET();
+  cloudLastHttp = code;
+  String body = http.getString();
+  http.end();
+
+  if (code < 200 || code >= 300) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "logreg import fail HTTP %d", code);
+    Serial.printf("[CLOUD] logreg GET fail %d %s\n", code, body.c_str());
+    return false;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "logreg JSON error");
+    return false;
+  }
+  if (!applyLogregModelFromDoc(doc)) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "logreg apply failed");
+    return false;
+  }
+  saveLogregModelToFs(body);
+  lrFromCloud = true;
+  strncpy(lrModelSource, "cloud", sizeof(lrModelSource) - 1);
+  snprintf(lrStatusMsg, sizeof(lrStatusMsg), "imported from cloud");
+  snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "logreg imported OK");
+  return true;
+}
+
+void handleImportLogreg() {
+  if (!cloudConfigured()) {
+    server.send(400, "application/json",
+                "{\"ok\":false,\"error\":\"set home Wi-Fi + cloud URL in Settings\"}");
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(503, "application/json",
+                "{\"ok\":false,\"error\":\"STA Wi-Fi not connected — join home network on ESP\"}");
+    return;
+  }
+  if (!tryImportLogregFromCloud()) {
+    JsonDocument err;
+    err["ok"] = false;
+    err["error"] = cloudStatusMsg;
+    err["http"] = cloudLastHttp;
+    err["hint"] = "deploy cloud/seed/softmax_logreg.json then retry";
+    String out;
+    serializeJson(err, out);
+    server.send(502, "application/json", out);
+    return;
+  }
+  JsonDocument ok;
+  ok["ok"] = true;
+  ok["source"] = lrModelSource;
+  ok["ready"] = lrReady;
+  ok["status"] = lrStatusMsg;
+  ok["pred"] = (int)lrPredClass;
+  ok["confidence"] = lrConfidence;
+  String out;
+  serializeJson(ok, out);
+  server.send(200, "application/json", out);
+}
+
 void collapseBatchToAverage() {
   Features avg = {};
   for (int i = 0; i < batchCount; i++) {
@@ -1243,8 +1599,16 @@ void collapseBatchToAverage() {
   datasetDirty = true;
   saveDatasetToFs();
 
-  // Upload to Render exactly when the dataset first completes 100 rows
-  if (reachedFull && cloudConfigured()) {
+  // Auto-queue cloud sync as soon as we have enough labeled rows (prototype)
+  if (datasetCount >= CLOUD_MIN_UPLOAD_ROWS && cloudConfigured()) {
+    if (reachedFull || datasetCount == CLOUD_MIN_UPLOAD_ROWS ||
+        (datasetCount % 10 == 0)) {
+      cloudUploadPending = true;
+      cloudUploadDone = false;
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "queued (%d rows)", datasetCount);
+      Serial.printf("[CLOUD] auto-queue upload (%d rows)\n", datasetCount);
+    }
+  } else if (reachedFull && cloudConfigured()) {
     cloudUploadPending = true;
     cloudUploadDone = false;
     snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "queued (100/%d)", MAX_DATASET);
@@ -1301,7 +1665,11 @@ void handleStatus() {
   doc["datasetCount"] = datasetCount;
   doc["batchCount"] = batchCount;
   doc["batchSize"] = BATCH_SIZE;
-  doc["predictionSource"] = gnbActive ? "gnb" : "rules";
+  doc["predictionSource"] = ensActive
+                                ? (ensModelsUsed >= 2 ? "ensemble" : (gnbReady ? "gnb" : "logreg"))
+                                : "rules";
+  doc["ensembleActive"] = ensActive;
+  doc["ensembleAgree"] = ensAgree;
   if (hasBatchAvg) {
     doc["lastTarget"] = (int)lastBatchAvg.target;
     doc["lastTargetLabel"] = targetName(lastBatchAvg.target);
@@ -1328,9 +1696,14 @@ void handleStatus() {
   cloud["staSsid"] = staSsid;
   cloud["lastHttp"] = cloudLastHttp;
   cloud["status"] = cloudStatusMsg;
-  cloud["trigger"] = "full_100";
+  cloud["trigger"] = "auto_sync";
+  cloud["minRows"] = CLOUD_MIN_UPLOAD_ROWS;
+  cloud["intervalMin"] = (int)(CLOUD_UPLOAD_INTERVAL_MS / 60000UL);
+  cloud["lastSuccessMs"] = cloudLastSuccessMs;
   cloud["gnbSource"] = gnbModelSource;
   cloud["gnbFromCloud"] = gnbFromCloud;
+  cloud["lrSource"] = lrModelSource;
+  cloud["lrFromCloud"] = lrFromCloud;
 
   JsonObject gnb = doc["gnb"].to<JsonObject>();
   gnb["sufficient"] = gnbSufficient;
@@ -1350,6 +1723,39 @@ void handleStatus() {
   for (int c = 0; c < GNB_CLASSES; c++) cc.add(gnbClassCount[c]);
   JsonArray post = gnb["posteriors"].to<JsonArray>();
   for (int c = 0; c < GNB_CLASSES; c++) post.add(gnbPost[c]);
+
+  JsonObject logreg = doc["logreg"].to<JsonObject>();
+  logreg["ready"] = lrReady;
+  logreg["active"] = lrActive;
+  logreg["pred"] = (int)lrPredClass;
+  logreg["predLabel"] = targetName(lrPredClass);
+  logreg["confidence"] = lrConfidence;
+  logreg["ruleConfidence"] = ruleConfidence;
+  logreg["confMin"] = LR_CONF_MIN;
+  logreg["status"] = lrStatusMsg;
+  logreg["source"] = lrModelSource;
+  logreg["fromCloud"] = lrFromCloud;
+  JsonArray lrP = logreg["posteriors"].to<JsonArray>();
+  for (int c = 0; c < GNB_CLASSES; c++) lrP.add(lrPost[c]);
+
+  JsonObject ens = doc["ensemble"].to<JsonObject>();
+  ens["active"] = ensActive;
+  ens["modelsUsed"] = ensModelsUsed;
+  ens["agree"] = ensAgree;
+  ens["pred"] = (int)ensPredClass;
+  ens["predLabel"] = targetName(ensPredClass);
+  ens["confidence"] = ensConfidence;
+  ens["ruleConfidence"] = ruleConfidence;
+  ens["confMin"] = ENS_CONF_MIN;
+  ens["status"] = ensStatusMsg;
+  ens["gnbPred"] = (int)gnbPredClass;
+  ens["gnbPredLabel"] = targetName(gnbPredClass);
+  ens["gnbConfidence"] = gnbConfidence;
+  ens["lrPred"] = (int)lrPredClass;
+  ens["lrPredLabel"] = targetName(lrPredClass);
+  ens["lrConfidence"] = lrConfidence;
+  JsonArray ensP = ens["posteriors"].to<JsonArray>();
+  for (int c = 0; c < GNB_CLASSES; c++) ensP.add(ensPost[c]);
 
   JsonObject feat = doc["features"].to<JsonObject>();
   Features live = latest;
@@ -1605,10 +2011,13 @@ void setupWeb() {
     if (loadGnbModelFromFs()) {
       Serial.println("[GNB] restored imported cloud model from flash");
     }
+    if (loadLogregModelFromFs()) {
+      Serial.println("[LR] restored softmax logreg model from flash");
+    }
   }
 
   if (cloudConfigured()) {
-    Serial.printf("Cloud: upload@%d rows + import GNB ← %s (%s)\n",
+    Serial.printf("Cloud: upload@%d rows + import GNB/LR ← %s (%s)\n",
                   MAX_DATASET, cloudBaseUrl, deviceId);
   } else {
     Serial.println("Cloud: waiting for home Wi‑Fi in Settings (URL pre-set)");
@@ -1618,6 +2027,7 @@ void setupWeb() {
   server.on("/api/dataset", HTTP_GET, handleDataset);
   server.on("/api/gnb", HTTP_GET, handleGnb);
   server.on("/api/cloud/import-gnb", HTTP_POST, handleImportGnb);
+  server.on("/api/cloud/import-logreg", HTTP_POST, handleImportLogreg);
   server.on("/api/cloud/config", HTTP_GET, handleGetCloudConfig);
   server.on("/api/cloud/config", HTTP_POST, handlePostCloudConfig);
   server.on("/api/thresholds", HTTP_GET, handleGetThresholds);
@@ -1761,18 +2171,27 @@ void loop() {
     riskPercent, overallStatus, warningCount
   );
 
-  // compact GNB line every loop when model exists
-  if (gnbReady) {
-    Serial.printf("  [GNB] %s pred=%s conf=%.2f rule=%.2f %s\n",
-                  gnbActive ? "ACTIVE" : "standby",
-                  targetName(gnbPredClass), gnbConfidence, ruleConfidence, gnbStatusMsg);
+  // compact ML lines: always show both when ready + ensemble decision
+  if (gnbReady || lrReady) {
+    if (gnbReady) {
+      Serial.printf("  [GNB] pred=%s conf=%.2f\n",
+                    targetName(gnbPredClass), gnbConfidence);
+    }
+    if (lrReady) {
+      Serial.printf("  [LR]  pred=%s conf=%.2f\n",
+                    targetName(lrPredClass), lrConfidence);
+    }
+    Serial.printf("  [ENS] %s pred=%s conf=%.2f rule=%.2f n=%d %s\n",
+                  ensActive ? "ACTIVE" : "standby",
+                  targetName(ensPredClass), ensConfidence, ruleConfidence,
+                  ensModelsUsed, ensStatusMsg);
   }
 
   if (batchCount >= BATCH_SIZE) collapseBatchToAverage();
 
   prevTempSlope = slopeForAcc;
 
-  maybeCloudUpload();
+  maybeCloudSync();
 
   // remind if nobody is connected to the SoftAP
   static unsigned long lastApLog = 0;

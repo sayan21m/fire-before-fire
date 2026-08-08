@@ -847,6 +847,27 @@ async function importGnbFromCloud() {
   }
 }
 
+async function importLogregFromCloud() {
+  const btn = document.getElementById("btn-import-logreg-cloud");
+  if (btn) btn.disabled = true;
+  showToast("Importing softmax LR…");
+  try {
+    const data = await api("/api/cloud/import-logreg", {
+      method: "POST",
+      body: "{}",
+    });
+    showToast(
+      data.ok ? `Softmax LR imported (${data.source || "cloud"})` : data.error || "Import failed",
+    );
+    pollLiveStatus();
+  } catch (e) {
+    const hint = e.data && e.data.hint ? ` — ${e.data.hint}` : "";
+    showToast((e.message || "LR import failed — need home Wi‑Fi") + hint);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function exportHistoryPrint() {
   const rows = filteredHistoryRows();
   const win = window.open("", "_blank");
@@ -966,6 +987,9 @@ function bindHistoryControls() {
   document
     .getElementById("btn-import-gnb-cloud")
     ?.addEventListener("click", importGnbFromCloud);
+  document
+    .getElementById("btn-import-logreg-cloud")
+    ?.addEventListener("click", importLogregFromCloud);
   document
     .getElementById("btn-save-cloud-cfg")
     ?.addEventListener("click", saveCloudConfigForm);
@@ -1253,25 +1277,31 @@ function setAdaptiveToggle(on) {
   }
 }
 
-function renderGnbBadge(gnb, source) {
+function renderGnbBadge(gnb, source, logreg, ensemble) {
   const badge = document.getElementById("gnb-badge");
-  if (!badge || !gnb) return;
-  const conf = ((gnb.confidence || 0) * 100).toFixed(0);
-  if (gnb.active || source === "gnb") {
-    badge.textContent = `gnb: ${gnb.predLabel || "ok"} ${conf}%`;
+  if (!badge) return;
+  const ens = ensemble || {};
+  if (ens.active || source === "ensemble") {
+    const conf = ((ens.confidence || 0) * 100).toFixed(0);
+    const tag = ens.agree ? "ens✓" : "ens";
+    badge.textContent = `${tag}: ${ens.predLabel || "ok"} ${conf}%`;
     badge.className =
       "rounded-md bg-success-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success-muted";
-    badge.title = `Gaussian NB active · score ${gnb.score}/10 · ${gnb.status || ""}`;
-  } else if (gnb.ready) {
-    badge.textContent = `gnb: ready ${conf}%`;
+    badge.title = `${ens.status || "ensemble"} · GNB ${gnb?.predLabel || "—"} / LR ${logreg?.predLabel || "—"}`;
+    return;
+  }
+  if (!gnb && !logreg) return;
+  const conf = ((gnb?.confidence || logreg?.confidence || 0) * 100).toFixed(0);
+  if (gnb?.ready || logreg?.ready) {
+    badge.textContent = `ml: standby ${conf}%`;
     badge.className =
       "rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-muted";
-    badge.title = `Model fitted — standby until conf ≥ rule · ${gnb.status || ""}`;
+    badge.title = ens.status || "Models ready — below ensemble gate";
   } else {
-    badge.textContent = `gnb: ${gnb.score || 0}/10`;
+    badge.textContent = `gnb: ${gnb?.score || 0}/10`;
     badge.className =
       "rounded-md bg-surface-raised px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-dim";
-    badge.title = gnb.status || "Collecting labeled dataset rows";
+    badge.title = gnb?.status || "Collecting labeled dataset rows";
   }
 }
 
@@ -1576,22 +1606,32 @@ function updateKpis(data) {
     batchEl.textContent = `${data.batchCount || 0}/${data.batchSize || 60}`;
 
   const gnb = data.gnb || {};
+  const logreg = data.logreg || {};
+  const ens = data.ensemble || {};
   const gnbEl = document.getElementById("sensor-gnb");
   if (gnbEl) {
-    gnbEl.textContent = gnb.active
-      ? `${gnb.predLabel || "ok"} ${(gnb.confidence * 100).toFixed(0)}%`
-      : gnb.ready
-        ? `ready ${(gnb.confidence * 100).toFixed(0)}%`
-        : gnb.status || "collecting";
+    if (ens.active || data.predictionSource === "ensemble") {
+      gnbEl.textContent = `ens ${ens.predLabel || "ok"} ${((ens.confidence || 0) * 100).toFixed(0)}%`;
+    } else if (gnb.ready || logreg.ready) {
+      const g = gnb.ready
+        ? `${gnb.predLabel || "ok"} ${((gnb.confidence || 0) * 100).toFixed(0)}%`
+        : "—";
+      const l = logreg.ready
+        ? `${logreg.predLabel || "ok"} ${((logreg.confidence || 0) * 100).toFixed(0)}%`
+        : "—";
+      gnbEl.textContent = `G ${g} · L ${l}`;
+    } else {
+      gnbEl.textContent = gnb.status || "collecting";
+    }
   }
   const gnbBadge = document.getElementById("badge-gnb-hw");
   if (gnbBadge) {
-    if (gnb.active) {
-      gnbBadge.textContent = "GNB";
+    if (ens.active) {
+      gnbBadge.textContent = ens.agree ? "ENS✓" : "ENS";
       gnbBadge.className =
         "rounded bg-success-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success-muted";
-    } else if (gnb.ready) {
-      gnbBadge.textContent = "Ready";
+    } else if (gnb.ready || logreg.ready) {
+      gnbBadge.textContent = "ML";
       gnbBadge.className =
         "rounded bg-accent-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase text-accent-muted";
     } else {
@@ -1835,7 +1875,13 @@ function refreshStatisticsFromLive() {
 
 function refreshBayesianFromLive(data) {
   const gnb = data.gnb || {};
-  const post = Array.isArray(gnb.posteriors) ? gnb.posteriors : [];
+  const logreg = data.logreg || {};
+  const ens = data.ensemble || {};
+  const post = Array.isArray(ens.posteriors)
+    ? ens.posteriors
+    : Array.isArray(gnb.posteriors)
+      ? gnb.posteriors
+      : [];
   const pOk =
     post[0] != null ? post[0] : Math.max(0, 1 - (data.riskPercent || 0) / 100);
   const pWarn = post[1] != null ? post[1] : 0;
@@ -1843,14 +1889,37 @@ function refreshBayesianFromLive(data) {
     post[2] != null ? post[2] : Math.min(0.95, (data.riskPercent || 0) / 100);
   const pHazard = Math.min(1, pWarn + pCrit);
   const conf =
-    gnb.confidence != null
-      ? gnb.confidence
-      : Math.min(0.99, (data.riskPercent || 0) / 100);
+    ens.confidence != null
+      ? ens.confidence
+      : gnb.confidence != null
+        ? gnb.confidence
+        : Math.min(0.99, (data.riskPercent || 0) / 100);
 
   const set = (id, text) => {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
   };
+
+  const fmtPost = (arr) => {
+    if (!Array.isArray(arr) || arr.length < 3) return "—";
+    return `ok ${Number(arr[0]).toFixed(2)} · warn ${Number(arr[1]).toFixed(2)} · crit ${Number(arr[2]).toFixed(2)}`;
+  };
+
+  set(
+    "ml-gnb-pred",
+    gnb.ready
+      ? `${gnb.predLabel || "ok"} · ${((gnb.confidence || 0) * 100).toFixed(0)}%`
+      : gnb.status || "not ready",
+  );
+  set("ml-gnb-detail", gnb.ready ? fmtPost(gnb.posteriors) : "—");
+  set(
+    "ml-lr-pred",
+    logreg.ready
+      ? `${logreg.predLabel || "ok"} · ${((logreg.confidence || 0) * 100).toFixed(0)}%`
+      : logreg.status || "not loaded",
+  );
+  set("ml-lr-detail", logreg.ready ? fmtPost(logreg.posteriors) : "—");
+
   set("bayes-p-ok", pOk.toFixed(2));
   set("bayes-p-hazard", pHazard.toFixed(2));
   set("bayes-conf", `${(conf * 100).toFixed(0)}%`);
@@ -1862,18 +1931,24 @@ function refreshBayesianFromLive(data) {
   const counts = gnb.classCounts || [0, 0, 0];
   set("bayes-counts", `counts [${counts.join(",")}]`);
   set("bayes-score", `${gnb.score ?? 0} / 10`);
-  set("bayes-source", data.predictionSource || (gnb.active ? "gnb" : "rules"));
+  set(
+    "bayes-source",
+    data.predictionSource || (ens.active ? "ensemble" : "rules"),
+  );
   const modelSrc = document.getElementById("bayes-model-src");
   if (modelSrc) {
-    modelSrc.textContent = gnb.fromCloud
-      ? "cloud"
-      : gnb.source === "local"
-        ? "local fit"
-        : gnb.ready
-          ? "local"
-          : "—";
+    const parts = [];
+    if (gnb.ready) parts.push(gnb.fromCloud ? "gnb·cloud" : "gnb");
+    if (logreg.ready) parts.push(logreg.fromCloud ? "lr·cloud" : "lr");
+    modelSrc.textContent = parts.length ? parts.join("+") : "—";
   }
-  set("bayes-pipeline-status", gnb.status || "Collecting labeled dataset…");
+  set(
+    "bayes-pipeline-status",
+    ens.status ||
+      (gnb.ready || logreg.ready
+        ? "Models ready"
+        : gnb.status || "Collecting labeled dataset…"),
+  );
 
   const barOk = document.getElementById("bayes-bar-ok");
   const barHz = document.getElementById("bayes-bar-hazard");
@@ -1887,25 +1962,26 @@ function refreshBayesianFromLive(data) {
   const decisionCard = document.getElementById("bayes-decision-card");
   let label = "Standby (rules)";
   let tone = "border-surface-border";
-  let eq = "waiting for sufficient labeled rows";
-  if (gnb.active) {
+  let eq = "waiting for ML models or below ensemble gate";
+  if (ens.active || data.predictionSource === "ensemble") {
     label =
-      gnb.predLabel === "critical"
-        ? "NB Critical"
-        : gnb.predLabel === "warn"
-          ? "NB Warning"
-          : "NB OK";
+      ens.predLabel === "critical"
+        ? "Ensemble Critical"
+        : ens.predLabel === "warn"
+          ? "Ensemble Warning"
+          : "Ensemble OK";
     tone =
-      gnb.predLabel === "critical"
+      ens.predLabel === "critical"
         ? "border-danger/40"
-        : gnb.predLabel === "warn"
+        : ens.predLabel === "warn"
           ? "border-warning/40"
           : "border-success/40";
-    eq = `NB conf ${(conf * 100).toFixed(0)}% ≥ rule ${((gnb.ruleConfidence || 0) * 100).toFixed(0)}%`;
-  } else if (gnb.ready) {
-    label = "NB ready · rules leading";
+    const agree = ens.agree ? "agree" : "mix";
+    eq = `ens ${agree} conf ${(conf * 100).toFixed(0)}% · GNB ${gnb.predLabel || "—"} / LR ${logreg.predLabel || "—"} ≥ rule ${((ens.ruleConfidence || gnb.ruleConfidence || 0) * 100).toFixed(0)}%`;
+  } else if (gnb.ready || logreg.ready) {
+    label = "Ensemble standby · rules leading";
     tone = "border-accent/30";
-    eq = `NB conf ${(conf * 100).toFixed(0)}% below override gate`;
+    eq = `ens conf ${(conf * 100).toFixed(0)}% below gate · GNB ${gnb.predLabel || "—"} / LR ${logreg.predLabel || "—"}`;
   } else if (data.status === "danger") {
     label = "Rules: Intervene";
     tone = "border-danger/40";
@@ -2065,7 +2141,7 @@ async function pollLiveStatus() {
     thresholdCache = thresholdsFromApi(data.thresholds);
     updateKpis(data);
     renderRegions();
-    renderGnbBadge(data.gnb, data.predictionSource);
+    renderGnbBadge(data.gnb, data.predictionSource, data.logreg, data.ensemble);
     renderWarnings(data.warnings || [], { source: data.predictionSource });
     renderParamStatus(data.paramStatus || []);
     applyLiveAlerts(data.warnings || []);

@@ -364,11 +364,12 @@ class TrainPipeline {
   /** Cold start: seed CSVs if needed, then ensure a model exists. */
   bootstrap() {
     this.ensureDirs();
+    const logreg = this.installLogregSeed();
     const added = this.seedFromCsvs();
     const rows = this.loadCorpus();
     if (!rows.length) {
       console.log("[pipeline] bootstrap: empty corpus (no seed CSVs?)");
-      return { seeded: added, fit: null };
+      return { seeded: added, fit: null, logreg };
     }
     const needFit =
       added > 0 ||
@@ -377,7 +378,32 @@ class TrainPipeline {
     if (fit.skipped) {
       console.log(`[pipeline] bootstrap: corpus=${rows.length} model already present`);
     }
-    return { seeded: added, fit };
+    return { seeded: added, fit, logreg };
+  }
+
+  /** Copy cloud/seed/softmax_logreg.json → models/ for ESP import. */
+  installLogregSeed() {
+    const src = path.join(this.seedDir, "softmax_logreg.json");
+    const dest = path.join(this.modelsDir, "softmax_logreg.json");
+    if (!fs.existsSync(src)) {
+      console.log("[pipeline] no seed softmax_logreg.json");
+      return false;
+    }
+    fs.copyFileSync(src, dest);
+    console.log("[pipeline] installed softmax logreg seed → models/");
+    return true;
+  }
+
+  getLogregModel() {
+    const dest = path.join(this.modelsDir, "softmax_logreg.json");
+    const src = path.join(this.seedDir, "softmax_logreg.json");
+    const p = fs.existsSync(dest) ? dest : fs.existsSync(src) ? src : null;
+    if (!p) return null;
+    try {
+      return JSON.parse(fs.readFileSync(p, "utf8"));
+    } catch {
+      return null;
+    }
   }
 }
 

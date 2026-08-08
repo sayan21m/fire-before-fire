@@ -68,7 +68,8 @@ code{background:#f4f4f5;padding:.1rem .35rem;border-radius:4px}</style></head><b
 <ul>
   <li><a href="/health">/health</a></li>
   <li><code>POST /api/ingest</code> — device dataset → append + retrain</li>
-  <li><code>GET /api/devices/:id/model</code> — ESP import</li>
+  <li><code>GET /api/devices/:id/model</code> — GNB (ESP import)</li>
+  <li><code>GET /api/devices/:id/logreg</code> — softmax LR (ESP import)</li>
   <li><code>GET /api/train/status</code></li>
   <li><code>POST /api/train/refit</code></li>
 </ul>
@@ -190,6 +191,18 @@ app.get("/api/devices/:id/model", auth, (req, res) => {
     });
   }
   res.json(model);
+});
+
+app.get("/api/devices/:id/logreg", auth, (req, res) => {
+  const model = pipeline.getLogregModel();
+  if (!model) {
+    return res.status(404).json({
+      error: "no softmax logreg model",
+      hint: "place cloud/seed/softmax_logreg.json (from ml_model/pipeline.py)",
+    });
+  }
+  const id = safeId(req.params.id);
+  res.json({ ...model, deviceId: id });
 });
 
 app.post("/api/devices/:id/model/refit", auth, (req, res) => {

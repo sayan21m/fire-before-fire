@@ -3,34 +3,39 @@
 .pioenvs
 .piolibdeps
 
-# VS Code / Cursor C++ helpers
-.vscode
-.vscode/.browse.c_cpp.db*
+# VS Code / Cursor C++ helpers (keep settings.json if useful)
 .vscode/c_cpp_properties.json
 .vscode/launch.json
+.vscode/extensions.json
 .vscode/ipch
 
 # OS / editor junk
 .DS_Store
+**/.DS_Store
 *.swp
 *~
 
-# Node (Tailwind CLI via npx; no committed node_modules)
+# Node
 node_modules/
 package-lock.json
+cloud/node_modules/
+cloud/package-lock.json
 
 # Secrets / local env
 .env
 .env.local
 cloud/.env
 
-# Cloud ingest local storage
+# Cloud local runtime (recreated on npm start / train)
 cloud/data/
-cloud/node_modules/
-cloud/package-lock.json
 
-# Python / analysis scratch
+# Python
 __pycache__/
 *.pyc
 .venv/
 analysis/
+ml_model/.venv/
+ml_model/artifacts/
+
+# Leftover / empty stubs
+ml_models/
