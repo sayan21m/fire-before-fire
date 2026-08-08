@@ -141,16 +141,20 @@ app.post("/api/devices/:id/notify", auth, async (req, res) => {
     (level === "critical"
       ? "Fire Before Fire — CRITICAL"
       : "Fire Before Fire — Warning");
-  const text =
+    const text =
     body.body ||
     body.message ||
-    `${body.label || body.param || "hazard"}: ${body.value ?? ""}`;
+    (body.sensorId
+      ? `${body.sensorId} @ ${body.sensorLoc || "?"} — ${body.label || body.param || "hazard"}: ${body.value ?? ""}`
+      : `${body.label || body.param || "hazard"}: ${body.value ?? ""}`);
   const result = await push.notifyDevice(id, {
     title,
     body: String(text),
     level,
     tag: body.tag || `fbf-${body.param || "alert"}-${body.ms || Date.now()}`,
     url: "/notify",
+    sensorId: body.sensorId || "",
+    sensorLoc: body.sensorLoc || "",
   });
   console.log(`[push] notify ${id} sent=${result.sent}/${result.subscribers || 0}`);
   res.status(result.ok ? 200 : 503).json(result);
@@ -163,11 +167,19 @@ app.get("/api/train/status", auth, (_req, res) => {
 app.post("/api/train/refit", auth, (_req, res) => {
   const fit = pipeline.refit();
   if (!fit.ok) return res.status(422).json(fit);
+  const lrFit = pipeline.refitLogreg();
   res.json({
     ok: true,
     trainN: fit.trainN,
     classCounts: fit.classCounts,
     fittedAt: fit.fittedAt,
+    logreg: lrFit.ok
+      ? {
+          trainN: lrFit.trainN,
+          accuracy: lrFit.accuracy,
+          fittedAt: lrFit.model.fittedAt,
+        }
+      : { ok: false, error: lrFit.error },
   });
 });
 

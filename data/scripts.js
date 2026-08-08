@@ -1320,7 +1320,16 @@ function renderWarnings(warnings, meta = {}) {
     .map((w) => {
       const crit = w.level === "critical";
       const fromGnb =
-        w.source === "gnb" || source === "gnb" || w.param === "gnb";
+        w.source === "gnb" ||
+        w.source === "ml" ||
+        source === "gnb" ||
+        source === "ensemble" ||
+        w.param === "gnb" ||
+        w.param === "ensemble";
+      const where =
+        w.sensorId || w.sensorLoc
+          ? `${w.sensorId || "?"} @ ${w.sensorLoc || "?"}`
+          : w.param;
       const detail = fromGnb
         ? `NB confidence ${fmtNum(w.value, 1)}% (min ${fmtNum(w.threshold, 1)}%) · overrides rules`
         : `Value ${fmtNum(w.value)} exceeds ${w.level} threshold ${fmtNum(w.threshold)}`;
@@ -1329,8 +1338,9 @@ function renderWarnings(warnings, meta = {}) {
           <div>
             <p class="text-sm font-semibold ${crit ? "text-danger-muted" : "text-warning-muted"}">${crit ? "CRITICAL" : "WARNING"} — ${w.label}</p>
             <p class="text-xs text-ink-dim mt-0.5">${detail}</p>
+            <p class="text-[11px] font-mono text-ink-muted mt-1">${where}</p>
           </div>
-          <span class="font-mono text-xs text-ink-muted">${fromGnb ? "GNB" : w.param}</span>
+          <span class="font-mono text-xs text-ink-muted">${fromGnb ? "ML" : w.param}</span>
         </div>
       </div>`;
     })
@@ -1494,6 +1504,14 @@ async function loadCloudConfigForm() {
         "https://fire-before-fire.onrender.com";
     if (key) key.value = cfg.cloudApiKey || "";
     if (id) id.value = cfg.deviceId || cfg.defaults?.deviceId || "esp32-01";
+    const cid = document.getElementById("cfg-current-sensor-id");
+    const cloc = document.getElementById("cfg-current-sensor-loc");
+    const tid = document.getElementById("cfg-temp-sensor-id");
+    const tloc = document.getElementById("cfg-temp-sensor-loc");
+    if (cid) cid.value = cfg.currentSensorId || "I-01";
+    if (cloc) cloc.value = cfg.currentSensorLoc || "Main line";
+    if (tid) tid.value = cfg.tempSensorId || "T-01";
+    if (tloc) tloc.value = cfg.tempSensorLoc || "Enclosure";
     const hint = document.getElementById("cfg-cloud-hint");
     if (hint) {
       hint.textContent = cfg.staConnected
@@ -1516,6 +1534,16 @@ async function saveCloudConfigForm() {
     cloudApiKey: document.getElementById("cfg-cloud-key")?.value?.trim() || "",
     deviceId:
       document.getElementById("cfg-device-id")?.value?.trim() || "esp32-01",
+    currentSensorId:
+      document.getElementById("cfg-current-sensor-id")?.value?.trim() || "I-01",
+    currentSensorLoc:
+      document.getElementById("cfg-current-sensor-loc")?.value?.trim() ||
+      "Main line",
+    tempSensorId:
+      document.getElementById("cfg-temp-sensor-id")?.value?.trim() || "T-01",
+    tempSensorLoc:
+      document.getElementById("cfg-temp-sensor-loc")?.value?.trim() ||
+      "Enclosure",
   };
   if (!body.staSsid) {
     showToast("Enter home Wi‑Fi SSID");
@@ -1601,6 +1629,17 @@ function updateKpis(data) {
   set("kpi-conf", conf, 0);
   set("sensor-current", f.current, 2);
   set("sensor-temp", f.temp, 1);
+
+  const sens = data.sensors || {};
+  const setTxt = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = v || "—";
+  };
+  setTxt("hw-device-id", sens.deviceId || data.cloud?.deviceId || "esp32-01");
+  setTxt("sensor-current-id", sens.current?.id || "I-01");
+  setTxt("sensor-current-loc", sens.current?.location || "Main line");
+  setTxt("sensor-temp-id", sens.temp?.id || "T-01");
+  setTxt("sensor-temp-loc", sens.temp?.location || "Enclosure");
 
   const batchEl = document.getElementById("sensor-batch");
   if (batchEl)
@@ -2075,8 +2114,10 @@ function applyLiveAlerts(warnings) {
     title: `${w.level === "critical" ? "Critical" : "Warning"}: ${w.label}`,
     reason: `Live value ${fmtNum(w.value)} vs threshold ${fmtNum(w.threshold)}`,
     time: new Date().toISOString().replace("T", " ").slice(0, 19),
-    region: "ESP32 Local Node",
-    sensor: "ACS712+DS18B20",
+    region: w.sensorLoc || "ESP32 Local Node",
+    sensor: w.sensorId
+      ? `${w.sensorId}${w.deviceId ? ` · ${w.deviceId}` : ""}`
+      : "ACS712+DS18B20",
     action: "Review circuit / reduce load",
     severity: w.level === "critical" ? "critical" : "warning",
   }));
@@ -2462,7 +2503,7 @@ function maybeNotifyWarning(w) {
       : "Fire Before Fire — Warning";
   const val = Number(w.value);
   const thr = Number(w.threshold);
-  const body = `${w.label || w.param}: ${Number.isFinite(val) ? val.toFixed(2) : w.value} (thr ${Number.isFinite(thr) ? thr.toFixed(2) : w.threshold})`;
+  const body = `${w.sensorId ? w.sensorId + " @ " + (w.sensorLoc || "?") + " — " : ""}${w.label || w.param}: ${Number.isFinite(val) ? val.toFixed(2) : w.value} (thr ${Number.isFinite(thr) ? thr.toFixed(2) : w.threshold})`;
   deliverAlert(title, body, w.level || "warn", key);
 }
 

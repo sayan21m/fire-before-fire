@@ -40,6 +40,8 @@ At idle with no load, **current ≈ 0 A** (and power/risk near zero) is expected
 
 - SoftAP Wi‑Fi (`FireBeforeFire` / `firebefore123`) → dashboard at `http://192.168.4.1`
 - **OS notifications** via HTTPS Web Push on Render (`/notify`); SoftAP also has in-app banner/beep alerts over WebSocket (port 81)
+- Per-device **sensor IDs + locations** (e.g. `I-01` / `T-01` under `esp32-01`) shown on the dashboard and in alerts
+- Cloud **auto-refits GNB and softmax LR** on every device ingest
 - Live KPIs, sparklines, monitoring charts, alerts, event history, CSV/JSON export
 - Online/offline pill, theme toggle, auto-refresh, mobile-friendly layout
 - Nine-parameter threshold table (manual + adaptive, never below factory defaults)

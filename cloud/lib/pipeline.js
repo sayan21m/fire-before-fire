@@ -2,12 +2,13 @@
  * Training pipeline:
  *   1. Seed corpus from cloud/seed/*.csv (dataset_1.csv …)
  *   2. Append device ingest batches
- *   3. Refit Gaussian NB on the full corpus after each change
+ *   3. Refit Gaussian NB + softmax LR on the full corpus after each ingest
  */
 
 const fs = require("fs");
 const path = require("path");
 const { fitGaussianNB, parseCsv, normalizeTarget } = require("./gnb");
+const { fitSoftmaxLogReg } = require("./logreg");
 
 const GLOBAL_ID = "global";
 
@@ -238,7 +239,35 @@ class TrainPipeline {
   }
 
   /**
-   * Device ingest: save snapshot, append to corpus, refit.
+   * Refit softmax LR on full corpus → models/softmax_logreg.json
+   * (ESP pulls this after sync; seed JSON is only the cold-start fallback).
+   */
+  refitLogreg() {
+    this.ensureDirs();
+    const rows = this.loadCorpus();
+    if (rows.length < 8) {
+      return { ok: false, error: "need ≥8 corpus rows for logreg", trainN: rows.length };
+    }
+    const fit = fitSoftmaxLogReg(rows, {
+      epochs: rows.length > 200 ? 200 : 250,
+      source: "corpus-online",
+    });
+    if (!fit.ok) return fit;
+    const dest = path.join(this.modelsDir, "softmax_logreg.json");
+    fs.writeFileSync(dest, JSON.stringify(fit.model, null, 2));
+    const meta = this.readMeta();
+    meta.lastLogregFitAt = fit.model.fittedAt;
+    meta.lastLogregTrainN = fit.trainN;
+    meta.lastLogregAccuracy = fit.accuracy;
+    this.writeMeta(meta);
+    console.log(
+      `[pipeline] logreg refit n=${fit.trainN} acc=${fit.accuracy} counts=[${fit.classCounts}]`,
+    );
+    return fit;
+  }
+
+  /**
+   * Device ingest: save snapshot, append to corpus, refit GNB + LR.
    */
   ingestDevice({ deviceId, rows, body = {} }) {
     this.ensureDirs();
@@ -297,6 +326,7 @@ class TrainPipeline {
     this.writeMeta(meta);
 
     const fit = this.refit({ deviceId: id });
+    const lrFit = this.refitLogreg();
 
     return {
       ok: true,
@@ -315,6 +345,15 @@ class TrainPipeline {
           }
         : null,
       modelError: fit.ok ? null : fit.error,
+      logreg: lrFit.ok
+        ? {
+            trainN: lrFit.trainN,
+            accuracy: lrFit.accuracy,
+            classCounts: lrFit.classCounts,
+            fittedAt: lrFit.model.fittedAt,
+          }
+        : null,
+      logregError: lrFit.ok ? null : lrFit.error,
     };
   }
 
@@ -354,6 +393,8 @@ class TrainPipeline {
       seededFiles: meta.seededFiles || [],
       ingestCount: meta.ingestCount || 0,
       lastFitAt: meta.lastFitAt,
+      lastLogregFitAt: meta.lastLogregFitAt || null,
+      lastLogregAccuracy: meta.lastLogregAccuracy ?? null,
       lastIngestAt: meta.lastIngestAt,
       seedDir: this.seedDir,
       models: { global: hasGlobal, defaultDevice: hasDefault },
@@ -378,13 +419,22 @@ class TrainPipeline {
     if (fit.skipped) {
       console.log(`[pipeline] bootstrap: corpus=${rows.length} model already present`);
     }
-    return { seeded: added, fit, logreg };
+    // Ensure LR exists / is warm on cold start (seed or online corpus)
+    let lrFit = null;
+    if (!fs.existsSync(path.join(this.modelsDir, "softmax_logreg.json")) || needFit) {
+      lrFit = this.refitLogreg();
+    }
+    return { seeded: added, fit, logreg: logreg || !!lrFit?.ok, lrFit };
   }
 
-  /** Copy cloud/seed/softmax_logreg.json → models/ for ESP import. */
+  /** Copy seed softmax only if no online-trained model exists yet. */
   installLogregSeed() {
     const src = path.join(this.seedDir, "softmax_logreg.json");
     const dest = path.join(this.modelsDir, "softmax_logreg.json");
+    if (fs.existsSync(dest)) {
+      console.log("[pipeline] keep existing softmax_logreg.json (online/trained)");
+      return true;
+    }
     if (!fs.existsSync(src)) {
       console.log("[pipeline] no seed softmax_logreg.json");
       return false;

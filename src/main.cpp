@@ -37,6 +37,12 @@ char cloudBaseUrl[128] = DEFAULT_CLOUD_BASE_URL;
 char cloudApiKey[64] = DEFAULT_CLOUD_API_KEY;
 char deviceId[32] = DEFAULT_DEVICE_ID;
 
+// Sensors under this device (editable in Settings — locate where events happen)
+char currentSensorId[24] = "I-01";
+char currentSensorLoc[48] = "Main line";
+char tempSensorId[24] = "T-01";
+char tempSensorLoc[48] = "Enclosure";
+
 // Dataset persistence on LittleFS (survives power loss; wiped by uploadfs)
 #define DATASET_PATH "/dataset.bin"
 #define DATASET_MAGIC 0x46424644u  // 'FBFD'
@@ -246,6 +252,8 @@ struct Warning {
   char param[24];
   char label[40];
   char level[12];  // warn | critical
+  char sensorId[24];
+  char sensorLoc[48];
   float value;
   float threshold;
   unsigned long ms;
@@ -256,6 +264,26 @@ int warningCount = 0;
 #define MAX_ALERT_LOG 40
 Warning alertLog[MAX_ALERT_LOG];
 int alertLogCount = 0;
+
+void fillWarningSensor(Warning &w) {
+  w.sensorId[sizeof(w.sensorId) - 1] = 0;
+  w.sensorLoc[sizeof(w.sensorLoc) - 1] = 0;
+  if (strcmp(w.param, "temp") == 0 || strcmp(w.param, "ma3T") == 0 ||
+      strcmp(w.param, "tempSlope") == 0 || strcmp(w.param, "tempAcc") == 0) {
+    strncpy(w.sensorId, tempSensorId, sizeof(w.sensorId) - 1);
+    strncpy(w.sensorLoc, tempSensorLoc, sizeof(w.sensorLoc) - 1);
+  } else if (strcmp(w.param, "ensemble") == 0 || strcmp(w.param, "gnb") == 0 ||
+             strcmp(w.param, "logreg") == 0) {
+    snprintf(w.sensorId, sizeof(w.sensorId), "%s", deviceId);
+    snprintf(w.sensorLoc, sizeof(w.sensorLoc), "%s + %s", currentSensorLoc,
+             tempSensorLoc);
+  } else {
+    strncpy(w.sensorId, currentSensorId, sizeof(w.sensorId) - 1);
+    strncpy(w.sensorLoc, currentSensorLoc, sizeof(w.sensorLoc) - 1);
+  }
+  w.sensorId[sizeof(w.sensorId) - 1] = 0;
+  w.sensorLoc[sizeof(w.sensorLoc) - 1] = 0;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────
 float paramValue(const Features &f, int id) {
@@ -312,6 +340,9 @@ void pushAlert(const Warning &w) {
   doc["value"] = w.value;
   doc["threshold"] = w.threshold;
   doc["ms"] = w.ms;
+  doc["sensorId"] = w.sensorId;
+  doc["sensorLoc"] = w.sensorLoc;
+  doc["deviceId"] = deviceId;
   doc["clients"] = alertWsClients;
   String out;
   serializeJson(doc, out);
@@ -695,6 +726,7 @@ void applyEnsembleOverrideIfConfident() {
       w.value = ensConfidence * 100.0f;
       w.threshold = ENS_CONF_MIN * 100.0f;
       w.ms = millis();
+      fillWarningSensor(w);
       if (ensPredClass > ensPrevPred) pushAlert(w);
     }
     ensPrevPred = ensPredClass;
@@ -747,6 +779,7 @@ void evaluatePrediction(const Features &f) {
       w.value = raw;
       w.threshold = lvl == LVL_CRITICAL ? params[i].critical : params[i].warn;
       w.ms = millis();
+      fillWarningSensor(w);
       if (lvl > prevLevels[i]) pushAlert(w);
     }
     prevLevels[i] = lvl;
@@ -1021,6 +1054,10 @@ bool saveCloudConfigToFs() {
   doc["cloudBaseUrl"] = cloudBaseUrl;
   doc["cloudApiKey"] = cloudApiKey;
   doc["deviceId"] = deviceId;
+  doc["currentSensorId"] = currentSensorId;
+  doc["currentSensorLoc"] = currentSensorLoc;
+  doc["tempSensorId"] = tempSensorId;
+  doc["tempSensorLoc"] = tempSensorLoc;
   File f = LittleFS.open(CLOUD_CFG_PATH, "w");
   if (!f) return false;
   bool ok = serializeJson(doc, f) > 0;
@@ -1046,13 +1083,26 @@ bool loadCloudConfigFromFs() {
     strncpy(cloudApiKey, doc["cloudApiKey"] | DEFAULT_CLOUD_API_KEY, sizeof(cloudApiKey) - 1);
   if (doc["deviceId"].is<const char *>())
     strncpy(deviceId, doc["deviceId"] | DEFAULT_DEVICE_ID, sizeof(deviceId) - 1);
+  if (doc["currentSensorId"].is<const char *>())
+    strncpy(currentSensorId, doc["currentSensorId"] | "I-01", sizeof(currentSensorId) - 1);
+  if (doc["currentSensorLoc"].is<const char *>())
+    strncpy(currentSensorLoc, doc["currentSensorLoc"] | "Main line", sizeof(currentSensorLoc) - 1);
+  if (doc["tempSensorId"].is<const char *>())
+    strncpy(tempSensorId, doc["tempSensorId"] | "T-01", sizeof(tempSensorId) - 1);
+  if (doc["tempSensorLoc"].is<const char *>())
+    strncpy(tempSensorLoc, doc["tempSensorLoc"] | "Enclosure", sizeof(tempSensorLoc) - 1);
   staSsid[sizeof(staSsid) - 1] = 0;
   staPass[sizeof(staPass) - 1] = 0;
   cloudBaseUrl[sizeof(cloudBaseUrl) - 1] = 0;
   cloudApiKey[sizeof(cloudApiKey) - 1] = 0;
   deviceId[sizeof(deviceId) - 1] = 0;
-  Serial.printf("[CFG] loaded cloud cfg url=%s sta=%s device=%s\n",
-                cloudBaseUrl, staSsid[0] ? staSsid : "(none)", deviceId);
+  currentSensorId[sizeof(currentSensorId) - 1] = 0;
+  currentSensorLoc[sizeof(currentSensorLoc) - 1] = 0;
+  tempSensorId[sizeof(tempSensorId) - 1] = 0;
+  tempSensorLoc[sizeof(tempSensorLoc) - 1] = 0;
+  Serial.printf("[CFG] loaded cloud cfg url=%s sta=%s device=%s I=%s@%s T=%s@%s\n",
+                cloudBaseUrl, staSsid[0] ? staSsid : "(none)", deviceId,
+                currentSensorId, currentSensorLoc, tempSensorId, tempSensorLoc);
   return true;
 }
 
@@ -1086,6 +1136,10 @@ void handleGetCloudConfig() {
   doc["cloudApiKeySet"] = strlen(cloudApiKey) > 0;
   doc["cloudApiKey"] = cloudApiKey;
   doc["deviceId"] = deviceId;
+  doc["currentSensorId"] = currentSensorId;
+  doc["currentSensorLoc"] = currentSensorLoc;
+  doc["tempSensorId"] = tempSensorId;
+  doc["tempSensorLoc"] = tempSensorLoc;
   doc["staConnected"] = WiFi.status() == WL_CONNECTED;
   doc["staIp"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
   doc["staStatus"] = (int)WiFi.status();
@@ -1138,6 +1192,22 @@ void handlePostCloudConfig() {
     copyJsonStr(doc["deviceId"], deviceId, sizeof(deviceId));
     if (deviceId[0] == 0)
       strncpy(deviceId, DEFAULT_DEVICE_ID, sizeof(deviceId) - 1);
+  }
+  if (!doc["currentSensorId"].isNull()) {
+    copyJsonStr(doc["currentSensorId"], currentSensorId, sizeof(currentSensorId));
+    if (currentSensorId[0] == 0) strncpy(currentSensorId, "I-01", sizeof(currentSensorId) - 1);
+  }
+  if (!doc["currentSensorLoc"].isNull()) {
+    copyJsonStr(doc["currentSensorLoc"], currentSensorLoc, sizeof(currentSensorLoc));
+    if (currentSensorLoc[0] == 0) strncpy(currentSensorLoc, "Main line", sizeof(currentSensorLoc) - 1);
+  }
+  if (!doc["tempSensorId"].isNull()) {
+    copyJsonStr(doc["tempSensorId"], tempSensorId, sizeof(tempSensorId));
+    if (tempSensorId[0] == 0) strncpy(tempSensorId, "T-01", sizeof(tempSensorId) - 1);
+  }
+  if (!doc["tempSensorLoc"].isNull()) {
+    copyJsonStr(doc["tempSensorLoc"], tempSensorLoc, sizeof(tempSensorLoc));
+    if (tempSensorLoc[0] == 0) strncpy(tempSensorLoc, "Enclosure", sizeof(tempSensorLoc) - 1);
   }
 
   // strip trailing slash on URL
@@ -1195,6 +1265,11 @@ bool tryUploadFullDatasetToCloud(bool force = false) {
   doc["datasetMax"] = MAX_DATASET;
   doc["full"] = datasetCount >= MAX_DATASET;
   doc["firmware"] = "fire-before-fire";
+  JsonObject sensors = doc["sensors"].to<JsonObject>();
+  sensors["currentId"] = currentSensorId;
+  sensors["currentLoc"] = currentSensorLoc;
+  sensors["tempId"] = tempSensorId;
+  sensors["tempLoc"] = tempSensorLoc;
   JsonArray rows = doc["rows"].to<JsonArray>();
   for (int i = 0; i < datasetCount; i++) {
     JsonObject row = rows.add<JsonObject>();
@@ -1266,7 +1341,10 @@ void cloudPushOsNotify(const Warning &w) {
   doc["value"] = w.value;
   doc["threshold"] = w.threshold;
   doc["ms"] = w.ms;
-  doc["body"] = String(w.label) + ": " + String(w.value, 2);
+  doc["sensorId"] = w.sensorId;
+  doc["sensorLoc"] = w.sensorLoc;
+  doc["body"] = String(w.sensorId) + " @ " + String(w.sensorLoc) + " — " +
+               String(w.label) + ": " + String(w.value, 2);
 
   String body;
   serializeJson(doc, body);
@@ -1766,6 +1844,17 @@ void handleStatus() {
   sens["tempOk"] = tempSensorOk;
   sens["tempDevices"] = tempDeviceCount;
   sens["currentOk"] = true;
+  sens["deviceId"] = deviceId;
+  JsonObject cur = sens["current"].to<JsonObject>();
+  cur["id"] = currentSensorId;
+  cur["location"] = currentSensorLoc;
+  cur["type"] = "ACS712";
+  cur["gpio"] = 34;
+  JsonObject tmp = sens["temp"].to<JsonObject>();
+  tmp["id"] = tempSensorId;
+  tmp["location"] = tempSensorLoc;
+  tmp["type"] = "DS18B20";
+  tmp["gpio"] = 4;
 
   JsonObject persist = doc["persist"].to<JsonObject>();
   persist["path"] = DATASET_PATH;
@@ -1885,7 +1974,13 @@ void handleStatus() {
     w["value"] = warnings[i].value;
     w["threshold"] = warnings[i].threshold;
     w["ms"] = warnings[i].ms;
-    w["source"] = (strcmp(warnings[i].param, "gnb") == 0) ? "gnb" : "rules";
+    w["sensorId"] = warnings[i].sensorId;
+    w["sensorLoc"] = warnings[i].sensorLoc;
+    w["deviceId"] = deviceId;
+    w["source"] = (strcmp(warnings[i].param, "gnb") == 0 ||
+                   strcmp(warnings[i].param, "ensemble") == 0)
+                      ? "ml"
+                      : "rules";
   }
 
   String out;
