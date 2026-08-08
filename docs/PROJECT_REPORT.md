@@ -1,295 +1,376 @@
 # Fire Before Fire — Project Report
 
-**Repository:** https://github.com/sayan21m/fire-before-fire  
-**Report date:** 8 August 2026  
-**Cloud:** https://fire-before-fire.onrender.com  
-**Branches of record:** `main`, `hardware-sg`, `software-sh`  
-**Merged PRs (selected):** [#1](https://github.com/sayan21m/fire-before-fire/pull/1) (`hardware-sg` → `main`), [#5](https://github.com/sayan21m/fire-before-fire/pull/5) (`software-sh` → `main`)
-
-> Updated to match the current codebase: SoftAP UI, dataset persistence, cloud GNB corpus, softmax logistic regression, confidence-weighted ensemble, and prototype auto cloud sync.
-
----
-
-## 1. Executive summary
-
-**Fire Before Fire** is an ESP32-based prototype that detects early electrical heating risk from **current** (ACS712) and **temperature** (DS18B20). The node hosts a SoftAP web dashboard (LittleFS), runs a weighted threshold rule engine, stores labeled batch averages on **flash** (`/dataset.bin`), and fuses two on-device ML predictors:
-
-| Model | Origin | Role |
-| ----- | ------ | ---- |
-| **Gaussian Naive Bayes** | Local fit and/or Render corpus | Class posteriors from 8 features |
-| **Softmax logistic regression** | `ml_model/` → LittleFS / cloud seed | Linear multiclass probabilities |
-| **Ensemble** | Confidence-weighted average of both | Final ML override of rules |
-
-With home Wi‑Fi configured once, the device **automatically** uploads labeled rows to Render and pulls updated GNB + LR weights (prototype; not production-grade OTA).
+| Field | Detail |
+| ----- | ------ |
+| **Team** | Spark Squad |
+| **Title** | Fire Before Fire — Early Electrical Heating / Fire-Risk Detection |
+| **College** | MCKV Institute of Engineering |
+| **Department** | Information Technology (IT) |
+| **Semester** | Assigned in 3rd; current work in 5th |
+| **Date** | 8 August 2026 |
+| **Repo** | https://github.com/sayan21m/fire-before-fire |
+| **Cloud** | https://fire-before-fire.onrender.com |
+| **Expense** | ₹744 (₹186 × 4 members) |
 
 ---
 
-## 2. Problem statement
+## Title page
 
-Electrical fires often grow from sustained overcurrent, poor connections, and conductor heating long before smoke or flame sensors trip. Consumer IoT stacks usually need always-on cloud connectivity. This project targets a **local-first** node that:
+**MCKV Institute of Engineering**  
+**Department of Information Technology**
 
-1. Measures load current and temperature near the circuit of interest
-2. Derives dynamics (slopes, acceleration, variance) that precede steady overheating
-3. Warns early via a browser UI on the same SoftAP
-4. Keeps labeled batches across power cycles so learning can resume after reboot
-5. Optionally syncs data and model weights to/from a small Render service for mentor demos and multi-device corpus growth
+**Title:** Fire Before Fire — Early Electrical Heating / Fire-Risk Detection  
+
+**Team Spark Squad**
+
+| Role | Name |
+| ---- | ---- |
+| Leader | Sayan Garai |
+| Member | Soumili Hazra |
+| Member | Aritra Ghosh |
+| Member | Snigdha Das |
+
+**Duration:** 3rd semester (assigned) → 5th semester (current)  
+**Expense:** ₹744 (equal share)  
+**Guide:** _(for DOCX)_  
 
 ---
 
-## 3. System architecture
+## Declaration
+
+We declare that **“Fire Before Fire — Early Electrical Heating / Fire-Risk Detection”**, submitted to the **Department of IT, MCKV Institute of Engineering**, is original work by **Team Spark Squad**.
+
+1. The work is our own, under academic guidance; tools and literature are acknowledged.  
+2. This report has not been submitted for any other award.  
+3. Sources are acknowledged to the best of our knowledge.  
+
+| Name | Signature | Date |
+| ---- | --------- | ---- |
+| Sayan Garai (Leader) | | |
+| Soumili Hazra | | |
+| Aritra Ghosh | | |
+| Snigdha Das | | |
+
+**Place:** ____________ **Date:** ____________
+
+---
+
+## Acknowledgement
+
+We thank **MCKV Institute of Engineering** and the **Department of IT** for this project (3rd–5th semester). We thank our guide and faculty for guidance during design, build, and documentation of **Fire Before Fire**.
+
+Thanks to **Spark Squad** (Sayan Garai, Soumili Hazra, Aritra Ghosh, Snigdha Das) for equal expense sharing (**₹744**) and joint work on hardware, software, testing, and docs. We also thank the ESP32 / PlatformIO / Node.js open-source stack and cloud hosting used in the prototype.
+
+**— Team Spark Squad**
+
+---
+
+## Abstract
+
+**Fire Before Fire** is a local-first ESP32 IoT prototype for early electrical heating risk. It senses **current** (ACS712) and **temperature** (DS18B20), derives heating features, and warns via a SoftAP dashboard.
+
+Scoring uses a rule engine, on-device **GNB**, **softmax LR**, and a confidence-weighted **ensemble**. Data persists on flash; optional home Wi‑Fi syncs to Render for model refit and **OS Web Push**. For academic demo only—not certified fire safety.
+
+**Keywords:** ESP32, ACS712, DS18B20, SoftAP, GNB, softmax LR, ensemble, IoT.
+
+---
+
+## 1. Introduction
+
+### 1.1 Motivation
+
+Overcurrent and conductor heating often precede fire. Low-cost local monitoring of pre-fire dynamics aids teaching and demos better than cloud-only or smoke-only systems.
+
+### 1.2 Objectives
+
+1. Sense current and temperature on ESP32.  
+2. Extract heating features (slopes, variance, acceleration).  
+3. SoftAP live UI without phone internet.  
+4. Rules + GNB + LR ensemble for warn/critical.  
+5. Persist labels; optional cloud sync.  
+6. In-app (WebSocket) and OS (Web Push) alerts.  
+
+### 1.3 Scope
+
+**In:** single node, SoftAP UI, flash persist, Render ingest/refit/push.  
+**Out:** multi-site deploy, smoke/flame sensors, certified safety, signed OTA.
+
+---
+
+## 2. Related work
+
+| Theme | Relevance |
+| ----- | --------- |
+| IoT fire monitors | Often smoke/gas; we target **I + T** heating precursors |
+| ESP32 SoftAP UIs | Local demo without a router |
+| Classical ML on MCU | GNB / linear LR fit ESP32; no deep models |
+| Ensembles | Confidence fusion of GNB + LR |
+
+---
+
+## 3. Team & budget
+
+| Name | Role | Focus |
+| ---- | ---- | ----- |
+| **Sayan Garai** | Leader | Firmware, ML, cloud, persist (`sayan21m`) |
+| **Soumili Hazra** | Member | SoftAP / UI (`soumili122004`) |
+| **Aritra Ghosh** | Member | Support (assembly, test, docs, presentation) |
+| **Snigdha Das** | Member | Support (assembly, test, docs, presentation) |
+
+**Budget: ₹744** → **₹186 / member**
+
+| Part | Role |
+| ---- | ---- |
+| ESP32 | MCU, SoftAP, STA, ML |
+| ACS712 | Current → GPIO 34 |
+| DS18B20 | Temp → GPIO 4 |
+| Resistor | ~4.7 kΩ pull-up |
+| Breadboard | Prototype |
+| Jumpers | Wiring |
+
+---
+
+## 4. Requirements
+
+| ID | Functional |
+| -- | ---------- |
+| FR1 | Sample ACS712 + DS18B20 |
+| FR2 | Features + risk (rules/ML) |
+| FR3 | SoftAP UI at 192.168.4.1 |
+| FR4 | Persist dataset on reboot |
+| FR5 | Cloud ingest + model pull |
+| FR6 | In-app + OS alerts |
+| FR7 | Sensor IDs under deviceId |
+
+| ID | Non-functional |
+| -- | -------------- |
+| NFR1 | Works offline on SoftAP |
+| NFR2 | Unique SoftAP pass; API key in Settings |
+| NFR3 | HTTPS with CA verify |
+| NFR4 | Academic prototype, not certified product |
+
+---
+
+## 5. Hardware
+
+| # | Part | Notes |
+| - | ---- | ----- |
+| 1 | ESP32 | SoftAP + app |
+| 2 | ACS712 | ADC **GPIO 34** |
+| 3 | DS18B20 | 1-Wire **GPIO 4** + pull-up |
+| 4 | Resistor | DS18B20 pull-up |
+| 5 | Breadboard | Assembly |
+| 6 | Jumpers | Interconnect |
+
+\[
+P \approx 230\,\mathrm{V} \times |I|
+\]
+
+Used in UI/rules; excluded from ML features. Mains work needs isolation; lab/demo use only.
+
+---
+
+## 6. Architecture
 
 ```
-┌─────────────┐     ADC      ┌──────────────────┐
-│   ACS712    │─────────────►│                  │
-└─────────────┘   GPIO 34    │      ESP32       │     SoftAP
-┌─────────────┐   1-Wire     │  firmware        │◄──────────────► Phone / laptop
-│   DS18B20   │─────────────►│  + LittleFS      │   192.168.4.1
-└─────────────┘   GPIO 4     └────────┬─────────┘
-                                      │
-                 Features → Rules ────┤
-                        ↓             │
-              Dataset → /dataset.bin  │
-                        ↓             │
-              GNB  +  Softmax LR ─────┤
-                        ↓             │
-                   Ensemble ──────────┘
-                                      │
-                         STA (optional home Wi‑Fi)
-                                      ▼
-                          Render cloud (ingest + models)
+ACS712 (GPIO 34) ─┐
+                  ├─► ESP32 + LittleFS ─ SoftAP ─► Phone (192.168.4.1)
+DS18B20 (GPIO 4) ─┘         │
+                            ├ Features → Rules
+                            ├ Dataset → /dataset.bin
+                            ├ GNB + Softmax LR → Ensemble
+                            └ STA → Render (ingest, refit, Web Push)
 ```
 
-| Layer      | Implementation |
-| ---------- | -------------- |
-| Sensing    | ACS712, DS18B20, zero-current calibration; `tempOk` health flag |
-| Features   | MA3, slopes (5 s), variance, power ≈ 230×\|I\|, temp acceleration |
-| Rules      | Warn/critical, importance weights, debounce, deadbands |
-| Dataset    | Up to 100 batch averages; target 0/1/2; `/dataset.bin` |
-| ML         | Local GNB + imported LR; ensemble override when confidence gates pass |
-| UI         | `data/` on LittleFS — live KPIs, GNB/LR/ensemble page, settings |
-| Cloud      | `cloud/` on Render — CSV seed, ingest, GNB refit, host LR JSON |
-| Sync       | Auto upload (≥24 rows, ~5 min) + auto pull GNB/LR over STA |
+| Layer | Detail |
+| ----- | ------ |
+| Sense | ACS712, DS18B20 |
+| Features | MA3, slopes, var, power, tempAcc |
+| Alerts | Live thresholds + debounce |
+| Train labels | Fixed bands (≠ adaptive alerts) |
+| ML | GNB + LR + ensemble |
+| UI | SoftAP PWA |
+| Cloud | Ingest, GNB/LR refit, `/notify` |
+| ID | deviceId + I-01 / T-01 locations |
 
 ---
 
-## 4. GitHub contribution analysis
+## 7. Design
 
-Stats below are derived from **`git log --all`** on this clone (authors as recorded by GitHub / local config).
+### 7.1 Features
 
-### 4.1 Contributors
+| Feature | Source |
+| ------- | ------ |
+| currentA, tempC | Sensors |
+| ma3I, ma3T | Moving averages |
+| currentSlope, tempSlope | ~5 s |
+| varI, tempAcc | History |
+| powerW | 230×\|I\| (rules only) |
+| target | Fixed train bands 0/1/2 |
 
-| Contributor       | Identity / focus | Primary focus |
-| ----------------- | ---------------- | ------------- |
-| **Sayan Garai**   | `sayan21m`       | Firmware, SoftAP APIs, GNB/LR ensemble, persist, cloud, docs |
-| **Soumili Hazra** | `software-sh`    | Initial dashboard HTML scaffolding; later merges / cleanup |
+ML (8): \|I\|, T, \|MA3I\|, MA3T, \|dI/dt\|, \|dT/dt\|, varI, \|d2T\|.
 
-### 4.2 Branch roles
+### 7.2 Rules vs labels
 
-| Branch        | Role |
-| ------------- | ---- |
-| `main`        | Integration branch |
-| `hardware-sg` | Sayan — sensors, firmware, prediction, SoftAP dashboard |
-| `software-sh` | Soumili — early frontend; later UI / merge work |
+Alerts use `params[]`. Dataset uses fixed `TRAIN_LABEL` (limits leakage).
 
-### 4.3 Commit timeline (selected)
+### 7.3 Models
 
-| Date       | Author        | Message |
-| ---------- | ------------- | ------- |
-| 2026-07-27 | Sayan Garai   | `init: initialized project files` |
-| 2026-07-27 | Soumili Hazra | `feat: added index.html contining dashboard` |
-| 2026-08-03 | Sayan Garai   | `feat: live ESP32 SoftAP dashboard with rules+GNB fire prediction` |
-| 2026-08-03 | Sayan Garai   | `docs: add README and project report; prettify web sources` |
-| 2026-08-04 | Sayan Garai   | `feat: persist labeled dataset on LittleFS and harden live SoftAP UI` |
-| 2026-08-04 | Soumili Hazra | Merge PRs #2–#5 (cleanup / hardware / software-sh → main) |
-| 2026-08-08 | Sayan Garai   | Cloud ingest pipeline, Softmax LR, ensemble, auto sync (this revision) |
+- **GNB:** fit or cloud import → posteriors  
+- **LR:** offline `ml_model/` or online `cloud/lib/logreg.js` → softmax  
+- **Ensemble:** conf-weighted average; override if conf ≥ 0.55 and ≥ rule conf  
 
-### 4.4 Division of labor (plain language)
+### 7.4 Persist & sync
 
-- **Soumili** established the **web dashboard shell** that later became the SoftAP UI.
-- **Sayan** built the **hardware + firmware path**, live APIs, GNB, dataset persistence, Softmax LR import, ensemble fusion, Render cloud service, and auto sync.
+| Item | Behavior |
+| ---- | -------- |
+| `/dataset.bin` | Labeled rows; wiped by `uploadfs` |
+| `/cloud_cfg.json` | STA + API key |
+| Models | `/gnb_model.json`, `/softmax_logreg.json` |
+| Auto sync | ≥24 rows, ~5 min → pull GNB+LR |
+| TLS | `src/certs.h` |
 
----
+### 7.5 Alerts
 
-## 5. Technical design
-
-### 5.1 Feature vector
-
-| Feature                      | Source |
-| ---------------------------- | ------ |
-| `currentA`                   | ACS712 |
-| `tempC`                      | DS18B20 (EMA) |
-| `ma3I` / `ma3T`              | 3-sample moving averages |
-| `currentSlope` / `tempSlope` | ~5 s window |
-| `varI`                       | Current variance over history |
-| `powerW`                     | 230 × \|I\| (UI / rules; excluded from GNB & LR) |
-| `tempAcc`                    | Δ(tempSlope)/Δt |
-| `target`                     | Label 0 ok / 1 warn / 2 critical |
-
-Shared ML features (8): \|I\|, T, \|MA3I\|, MA3T, \|dI/dt\|, \|dT/dt\|, varI, \|d2T\|.
-
-### 5.2 Rule engine
-
-- Importance-weighted contributions to `riskPercent`
-- Debounce (`WARN_HOLD_COUNT = 3`) and deadbands to cut idle false alarms
-- Adaptive thresholds may rise from calm data but **never fall below factory defaults**
-
-### 5.3 Gaussian NB
-
-1. Assess sufficiency (count, class coverage, imbalance) → score /10  
-2. Fit means / variances / priors when score ≥ 6 (or load cloud `/gnb_model.json`)  
-3. Predict posteriors each loop  
-
-### 5.4 Softmax logistic regression
-
-1. Offline train: `ml_model/pipeline.py` on `dataset/dataset_1.csv` (NumPy softmax + CE)  
-2. Export slim JSON (`mean`, `std`, `W`, `b`) to `data/` + `cloud/seed/`  
-3. ESP: standardize → \(z = W^\top x' + b\) → softmax → class posteriors  
-4. Loaded from LittleFS seed on boot and/or cloud `GET .../logreg`
-
-### 5.5 Ensemble
-
-- Always run ready models each loop (both predictions visible in UI / Serial)  
-- Fuse: confidence-weighted average of class posteriors  
-- If GNB and LR agree on the argmax class → slight confidence boost  
-- Override rules when `ensConfidence ≥ 0.55` **and** ≥ `ruleConfidence`  
-- `predictionSource`: `ensemble` | `gnb` | `logreg` | `rules`
-
-### 5.6 Dataset persistence
-
-- Binary `/dataset.bin` on LittleFS (`magic`, `version`, `count`, `Features[]`)  
-- Written after each batch collapse; loaded after LittleFS mount  
-- Firmware-only flash keeps the file; **`uploadfs` erases it**
-
-### 5.7 Cloud sync (prototype)
-
-| Trigger | Behavior |
-| ------- | -------- |
-| STA configured + ≥24 rows | Auto `POST /api/ingest` |
-| Interval | Re-upload ~every 5 minutes while online |
-| After successful upload | Auto-pull GNB + softmax LR |
-| STA drop | Reconnect attempt ~every 30 s |
-| Manual | SoftAP buttons still available |
-
-Settings save STA SSID/password + cloud URL/API key/device id to `/cloud_cfg.json`.
-
-### 5.8 Sensor fault path
-
-If DS18B20 disconnects (`-127 °C` / 0 devices): keep live **current**, set `sensors.tempOk = false`, show banner; full labeling resumes when temp returns.
-
-### 5.9 SoftAP UX
-
-No internet on SoftAP. Tailwind is bundled in `data/app.css`. Theme toggle, auto-refresh pause, history pagination, CSV/JSON export supported.
+| Channel | Use |
+| ------- | --- |
+| WS :81 | SoftAP in-app |
+| Web Push | OS after `/notify` |
 
 ---
 
-## 6. How to reproduce
+## 8. Implementation
+
+| Area | Paths |
+| ---- | ----- |
+| Firmware | `src/main.cpp`, `certs.h` |
+| UI | `data/` |
+| Offline LR | `ml_model/` |
+| Cloud | `cloud/` |
+| Seed | `dataset/`, `cloud/seed/` |
+
+**Stack:** PlatformIO, LittleFS, ArduinoJson, WebSockets, Express, NumPy (optional), Tailwind.
+
+---
+
+## 9. GitHub contributions
+
+GitHub Contributors, **26 Jul–8 Aug 2026**, `main`, exclude merges:
+
+![Contributors](assets/github-contributors.png)
+
+| Rank | User | Member | Commits | ++ | -- |
+| ---- | ---- | ------ | ------: | -: | -: |
+| 1 | `soumili122004` | Soumili Hazra | 11 | 2,896 | 127 |
+| 2 | `sayan21m` | Sayan Garai | 7 | 9,578 | 2,913 |
+
+Peak week: **3 Aug 2026**. Soumili: more commits (UI). Sayan: more lines (firmware/ML/cloud). Aritra & Snigdha: equal expense/delivery; work may be outside this `main` commit window.
+
+| Branch | Focus |
+| ------ | ----- |
+| `main` | Integration |
+| `hardware-sg` | Firmware |
+| `software-sh` | UI |
+
+---
+
+## 10. Reproduce
 
 ```bash
 git clone https://github.com/sayan21m/fire-before-fire.git
 cd fire-before-fire
-pio run -t upload --upload-port /dev/cu.usbserial-0001
-npx --yes tailwindcss@3.4.17 -i ./src-css/input.css -o ./data/app.css --minify   # if CSS changed
-pio run -t uploadfs --upload-port /dev/cu.usbserial-0001   # rewrites LittleFS
+pio run -t upload --upload-port <port>
+pio run -t uploadfs --upload-port <port>
 ```
 
-Optional ML retrain:
-
-```bash
-cd ml_model && pip install -r requirements.txt
-python pipeline.py --csv ../dataset/dataset_1.csv
-```
-
-Optional local cloud:
-
-```bash
-cd cloud && npm install && npm run train && npm start
-```
-
-Join SoftAP **FireBeforeFire** (device-unique password on Serial) → **http://192.168.4.1** → Settings → home Wi‑Fi + API key for auto sync.
+1. Serial 115200 → SoftAP password (`fbf…`)  
+2. Join FireBeforeFire → `http://192.168.4.1`  
+3. Settings → home Wi‑Fi + API key → Save  
+4. Optional: `https://fire-before-fire.onrender.com/notify`  
 
 ---
 
-## 7. Results & status
+## 11. Results
 
-| Capability                              | Status |
-| --------------------------------------- | ------ |
-| Current + temperature acquisition       | Implemented |
-| Feature extraction + batch dataset      | Implemented |
-| Dataset persist across reboot           | Implemented (`/dataset.bin`) |
-| DS18B20 fault banner / API health       | Implemented |
-| Rule-based warnings + settings UI       | Implemented |
-| SoftAP dashboard                        | Implemented |
-| Installable PWA + phone notifications   | Implemented (WebSocket fan-out on :81) |
-| On-device GNB                           | Implemented |
-| Softmax LR (offline train + on-device)  | Implemented |
-| GNB + LR ensemble                       | Implemented |
-| Render ingest + GNB corpus              | Implemented |
-| Auto upload + model pull (prototype)    | Implemented |
-| Multi-region / smoke / flame sensors    | Out of scope |
-| Production signed OTA / persistent disk | Not claimed |
-| Certified fire safety                   | Not claimed |
+| Capability | Status |
+| ---------- | ------ |
+| Sense I + T; features; SoftAP UI | Done |
+| Rules + train-label split; GNB/LR/ensemble | Done |
+| Persist; sensor IDs; cloud refit + auto sync | Done |
+| SoftAP unique pass; TLS verify; Web Push | Done |
+| Certified / multi-site product | Out of scope |
 
-**Practical note:** Idle-only class-0 data limits GNB sufficiency until warn/critical labels appear. Idle current near **0 A** with a healthy temp sensor is normal with no load.
+Seed train-set (~81 rows): GNB ≈95% acc; LR ≈99% acc (not held-out).
 
 ---
 
-## 8. Risks & limitations
+## 12. Limitations
 
-- Labels for `target` come from the same thresholds → **label leakage** for formal ML evaluation  
-- `uploadfs` clears dataset, cloud config, and imported models  
-- Render free tier disk is **ephemeral**; seed files reload on cold start  
-- Auto sync is a prototype (fixed interval, no model signing / versioning UI)  
-- ACS712 / DS18B20 noise requires deadbands; calibration quality matters  
-- Mains instrumentation requires proper isolation and safety practice  
-
----
-
-## 9. Future work
-
-- Independent hazard labels (operator tag or secondary sensor)  
-- Model version field + “new model available” badge  
-- Persistent cloud disk or object storage for long-lived corpora  
-- Larger stratified collection for offline sklearn / LR validation  
-- Multi-node device registry when hardware allows  
+- Small, imbalanced seed data  
+- `uploadfs` wipes dataset/config/models  
+- Render free disk ephemeral  
+- SoftAP trust boundary  
+- Not certified; mains needs isolation  
 
 ---
 
-## 10. Conclusion
+## 13. Future work
 
-Fire Before Fire demonstrates a complete **local early-warning loop**—sense → feature → rules → labeled memory → GNB + Softmax LR → ensemble → SoftAP dashboard—with an optional **cloud sync path** for corpus growth and model refresh. GitHub history shows collaboration between **frontend scaffolding (Soumili Hazra)** and **embedded + ML/cloud integration (Sayan Garai)**.
+- Broader Git/hardware logs for all members  
+- Larger held-out datasets  
+- Persistent cloud storage; SoftAP auth  
+- Optional gas/smoke; multi-node registry  
 
 ---
 
-## Appendix A — Key paths
+## 14. Conclusion
 
-| Path | Purpose |
+**Team Spark Squad** (IT, MCKVIE) built **Fire Before Fire**: ESP32 early heating warning with rules + GNB/LR ensemble, SoftAP UI, and optional cloud sync. Assigned in **3rd semester**, continued in **5th**. Code history highlights Sayan and Soumili; Aritra and Snigdha share expense (**₹744**) and team ownership. Academic prototype only.
+
+---
+
+## References
+
+1. Espressif — ESP32 / Arduino-ESP32 docs  
+2. DS18B20 datasheet (Analog Devices / Maxim)  
+3. ACS712 module datasheets  
+4. https://github.com/sayan21m/fire-before-fire  
+5. https://fire-before-fire.onrender.com  
+6. Bishop, C. M. — *Pattern Recognition and Machine Learning*  
+7. Google Trust Services / Let’s Encrypt root CAs  
+8. MCKV Institute of Engineering — Dept. of IT  
+
+---
+
+## Appendix A — Paths
+
+| Path | Use |
+| ---- | --- |
+| `src/main.cpp`, `certs.h` | Firmware / TLS |
+| `data/` | SoftAP UI |
+| `ml_model/`, `cloud/` | LR train / API |
+| `docs/assets/github-contributors.png` | Contrib chart |
+| `/dataset.bin` | On-device rows |
+
+## Appendix B — SoftAP
+
+| Setting | Value |
+| ------- | ----- |
+| SSID | FireBeforeFire |
+| Password | `fbf` + MAC (Serial/Settings) |
+| URL | http://192.168.4.1 |
+
+## Appendix C — Glossary
+
+| Term | Meaning |
 | ---- | ------- |
-| `src/main.cpp` | Firmware (sense, rules, GNB, LR, ensemble, persist, sync) |
-| `data/index.html` / `scripts.js` / `app.css` | SoftAP UI |
-| `data/softmax_logreg.json` | LittleFS seed LR weights |
-| `dataset/dataset_1.csv` | Offline labeled CSV |
-| `ml_model/` | Softmax LR training pipeline |
-| `cloud/` | Render API, GNB corpus, seed models |
-| `/dataset.bin` | On-device persisted rows |
-| `/gnb_model.json` / `/softmax_logreg.json` | Imported / seeded ML weights |
-| `/cloud_cfg.json` | STA + cloud settings |
+| SoftAP / STA | ESP as AP / as client |
+| GNB / LR | Gaussian NB / softmax logistic regression |
+| Ensemble | Confidence fusion of GNB + LR |
 
-## Appendix B — Default SoftAP
+## Appendix D — Expense
 
-| Setting  | Value |
-| -------- | ----- |
-| SSID     | `FireBeforeFire` |
-| SoftAP password | Device-unique `fbf` + MAC (Serial / Settings) |
-| URL      | `http://192.168.4.1` |
-
-## Appendix C — `/api/status` extras
-
-| Field | Meaning |
-| ----- | ------- |
-| `sensors.tempOk` | DS18B20 responding |
-| `persist.*` | Dataset flash status |
-| `cloud.*` | STA / sync status (`trigger: auto_sync`) |
-| `gnb.*` | Local/cloud GNB prediction |
-| `logreg.*` | Softmax LR prediction |
-| `ensemble.*` | Fused posteriors, agree flag, active override |
-| `predictionSource` | `rules` \| `gnb` \| `logreg` \| `ensemble` |
+| Item | ₹ |
+| ---- | -: |
+| Total | **744** |
+| Per member (÷4) | **186** |
