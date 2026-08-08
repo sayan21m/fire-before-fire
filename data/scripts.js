@@ -824,6 +824,31 @@ async function exportDatasetJson() {
   }
 }
 
+async function importGnbFromCloud() {
+  const btn = document.getElementById("btn-import-gnb-cloud");
+  if (btn) btn.disabled = true;
+  try {
+    const data = await api("/api/cloud/import-gnb", {
+      method: "POST",
+      body: "{}",
+    });
+    showToast(
+      data.ok
+        ? `GNB imported (n=${data.trainN ?? "—"})`
+        : data.error || "Import failed",
+    );
+    pollLiveStatus();
+  } catch (e) {
+    const msg =
+      e?.message?.includes("HTTP")
+        ? "Import failed — need STA Wi‑Fi + uploaded dataset on Render"
+        : "Import failed — ESP offline or cloud not configured";
+    showToast(msg);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function exportHistoryPrint() {
   const rows = filteredHistoryRows();
   const win = window.open("", "_blank");
@@ -940,6 +965,9 @@ function bindHistoryControls() {
   document
     .getElementById("btn-export-dataset-json")
     ?.addEventListener("click", exportDatasetJson);
+  document
+    .getElementById("btn-import-gnb-cloud")
+    ?.addEventListener("click", importGnbFromCloud);
 }
 
 function bindAutoRefreshToggle() {
@@ -1386,6 +1414,16 @@ function updatePersistUi(data) {
       ? `${data.datasetCount || 0} rows on flash`
       : `${data.datasetCount || 0} rows (not saved yet)`;
   }
+  const c = data.cloud || {};
+  const cloudEl = document.getElementById("cloud-status");
+  if (cloudEl) {
+    if (!c.configured) cloudEl.textContent = "off";
+    else if (c.done) cloudEl.textContent = c.status || "uploaded";
+    else if (c.pending) cloudEl.textContent = c.status || "queued";
+    else
+      cloudEl.textContent =
+        c.status || `${data.datasetCount || 0}/100 then upload`;
+  }
 }
 
 function updateSensorFaultBanner(data) {
@@ -1724,6 +1762,16 @@ function refreshBayesianFromLive(data) {
   set("bayes-counts", `counts [${counts.join(",")}]`);
   set("bayes-score", `${gnb.score ?? 0} / 10`);
   set("bayes-source", data.predictionSource || (gnb.active ? "gnb" : "rules"));
+  const modelSrc = document.getElementById("bayes-model-src");
+  if (modelSrc) {
+    modelSrc.textContent = gnb.fromCloud
+      ? "cloud"
+      : gnb.source === "local"
+        ? "local fit"
+        : gnb.ready
+          ? "local"
+          : "—";
+  }
   set("bayes-pipeline-status", gnb.status || "Collecting labeled dataset…");
 
   const barOk = document.getElementById("bayes-bar-ok");

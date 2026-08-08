@@ -1119,9 +1119,19 @@
                     </div>
                     <div class="font-mono mt-0.5">
                       Source: <span id="bayes-source">rules</span>
+                      · model:
+                      <span id="bayes-model-src">—</span>
                     </div>
                   </div>
                   <div class="flex flex-wrap gap-2 justify-end">
+                    <button
+                      id="btn-import-gnb-cloud"
+                      type="button"
+                      class="rounded-lg border border-accent/40 bg-accent-soft px-3 py-1.5 text-xs text-accent-muted hover:bg-accent/20 transition"
+                      title="Download GNB params from Render (needs STA Wi‑Fi)"
+                    >
+                      Import GNB from cloud
+                    </button>
                     <button
                       id="btn-export-dataset-csv"
                       type="button"
@@ -1646,6 +1656,16 @@
                     >
                       <span class="text-ink-dim">Dataset on flash</span>
                       <span id="persist-status" class="font-mono text-ink"
+                        >—</span
+                      >
+                    </div>
+                    <div
+                      class="flex justify-between gap-3 border-b border-surface-border pb-2"
+                    >
+                      <span class="text-ink-dim">Cloud (at 100 rows)</span>
+                      <span
+                        id="cloud-status"
+                        class="font-mono text-ink text-right max-w-[55%]"
                         >—</span
                       >
                     </div>

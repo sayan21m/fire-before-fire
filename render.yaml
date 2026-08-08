@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: fire-before-fire-cloud
+    runtime: node
+    rootDir: cloud
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: CLOUD_API_KEY
+        sync: false
+      - key: NODE_VERSION
+        value: "20"

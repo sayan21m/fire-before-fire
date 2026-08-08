@@ -10,6 +10,8 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <math.h>
@@ -19,10 +21,17 @@
 #define AP_SSID "FireBeforeFire"
 #define AP_PASS "firebefore123"
 
-// Optional: put ESP on your home Wi‑Fi so the phone keeps internet + CDNs work.
-// Leave blank ("") to use SoftAP only.
+// Home Wi‑Fi (STA) — required for Render upload when dataset hits 100 rows.
+// SoftAP dashboard still works locally. Leave blank to disable cloud upload.
 #define STA_SSID ""
 #define STA_PASS ""
+
+// Render ingest (upload only when dataset reaches MAX_DATASET rows).
+// Example: "https://your-service.onrender.com"
+#define CLOUD_BASE_URL ""
+#define CLOUD_API_KEY "change-me-fbf-key"
+#define DEVICE_ID "esp32-01"
+#define CLOUD_RETRY_MS 120000UL  // retry failed upload every 2 min while pending
 
 // Dataset persistence on LittleFS (survives power loss; wiped by uploadfs)
 #define DATASET_PATH "/dataset.bin"
@@ -102,6 +111,18 @@ bool hasBatchAvg = false;
 Features dataset[MAX_DATASET];
 int datasetCount = 0;
 bool datasetDirty = false;
+
+bool cloudUploadPending = false;   // set when dataset first reaches 100 rows
+bool cloudUploadDone = false;      // success this fill cycle
+unsigned long cloudLastAttemptMs = 0;
+int cloudLastHttp = 0;
+char cloudStatusMsg[64] = "idle";
+bool gnbFromCloud = false;
+char gnbModelSource[16] = "none";  // none | local | cloud
+
+#define GNB_MODEL_PATH "/gnb_model.json"
+
+void appendFeatureRow(JsonObject row, const Features &f);
 
 // ── Gaussian Naive Bayes pipeline ──────────────────────────────────
 // Features used for GNB (skip powerW — algebraically = 230*|I|)
@@ -358,6 +379,8 @@ bool fitGaussianNB() {
 
   gnbTrainN = datasetCount;
   gnbReady = true;
+  gnbFromCloud = false;
+  strncpy(gnbModelSource, "local", sizeof(gnbModelSource) - 1);
   snprintf(gnbStatusMsg, sizeof(gnbStatusMsg), "fitted n=%d score=%d/10", gnbTrainN, gnbSufficiencyScore);
   Serial.printf("[GNB] fitted n=%d counts=[%d,%d,%d] score=%d/10\n",
                 gnbTrainN, gnbClassCount[0], gnbClassCount[1], gnbClassCount[2], gnbSufficiencyScore);
@@ -737,7 +760,272 @@ bool loadDatasetFromFs() {
     hasBatchAvg = true;
   }
   Serial.printf("[FS] loaded dataset (%d rows) from %s\n", datasetCount, DATASET_PATH);
+  // If flash already has a full dataset, queue one Render upload when STA is online
+  if (datasetCount >= MAX_DATASET && strlen(CLOUD_BASE_URL) > 0) {
+    cloudUploadPending = true;
+    cloudUploadDone = false;
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "queued (full on boot)");
+  }
   return true;
+}
+
+bool cloudConfigured() {
+  return strlen(CLOUD_BASE_URL) > 0 && strlen(STA_SSID) > 0;
+}
+
+bool tryUploadFullDatasetToCloud() {
+  if (!cloudConfigured()) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "disabled (set STA+URL)");
+    return false;
+  }
+  if (datasetCount < MAX_DATASET) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "waiting (%d/%d)", datasetCount, MAX_DATASET);
+    return false;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "waiting Wi‑Fi");
+    return false;
+  }
+
+  cloudLastAttemptMs = millis();
+  snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "uploading…");
+
+  JsonDocument doc;
+  doc["deviceId"] = DEVICE_ID;
+  doc["datasetCount"] = datasetCount;
+  doc["datasetMax"] = MAX_DATASET;
+  doc["full"] = true;
+  doc["firmware"] = "fire-before-fire";
+  JsonArray rows = doc["rows"].to<JsonArray>();
+  for (int i = 0; i < datasetCount; i++) {
+    JsonObject row = rows.add<JsonObject>();
+    row["i"] = i;
+    appendFeatureRow(row, dataset[i]);
+  }
+
+  String body;
+  serializeJson(doc, body);
+
+  String url = String(CLOUD_BASE_URL) + "/api/ingest";
+  bool useTls = strncmp(CLOUD_BASE_URL, "https://", 8) == 0;
+  HTTPClient http;
+  WiFiClientSecure secure;
+  int code = -1;
+
+  Serial.printf("[CLOUD] full dataset POST %s (%u bytes, %d rows)\n",
+                url.c_str(), (unsigned)body.length(), datasetCount);
+
+  if (useTls) {
+    secure.setInsecure();
+    if (!http.begin(secure, url)) {
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "begin failed");
+      return false;
+    }
+  } else {
+    if (!http.begin(url)) {
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "begin failed");
+      return false;
+    }
+  }
+
+  http.setTimeout(12000);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", String("Bearer ") + CLOUD_API_KEY);
+  http.addHeader("X-Device-Id", DEVICE_ID);
+  code = http.POST(body);
+  cloudLastHttp = code;
+  String resp = http.getString();
+  http.end();
+
+  if (code >= 200 && code < 300) {
+    cloudUploadPending = false;
+    cloudUploadDone = true;
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "uploaded HTTP %d", code);
+    Serial.printf("[CLOUD] OK %d %s\n", code, resp.c_str());
+    return true;
+  }
+
+  snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "fail HTTP %d", code);
+  Serial.printf("[CLOUD] fail %d %s\n", code, resp.c_str());
+  return false;
+}
+
+void maybeCloudUpload() {
+  if (!cloudUploadPending || cloudUploadDone) return;
+  if (!cloudConfigured()) return;
+  if (datasetCount < MAX_DATASET) return;
+  unsigned long now = millis();
+  if (cloudLastAttemptMs && (now - cloudLastAttemptMs) < CLOUD_RETRY_MS) return;
+  tryUploadFullDatasetToCloud();
+}
+
+bool applyGnbModelFromDoc(JsonDocument &doc) {
+  int ver = doc["version"] | 0;
+  int classes = doc["classes"] | 0;
+  int feats = doc["feats"] | 0;
+  if (ver != 1 || classes != GNB_CLASSES || feats != GNB_FEATS) {
+    Serial.printf("[GNB] bad model header ver=%d classes=%d feats=%d\n", ver, classes, feats);
+    return false;
+  }
+  JsonArray means = doc["mean"].as<JsonArray>();
+  JsonArray vars = doc["var"].as<JsonArray>();
+  JsonArray priors = doc["logPrior"].as<JsonArray>();
+  JsonArray counts = doc["classCounts"].as<JsonArray>();
+  if (means.isNull() || vars.isNull() || priors.isNull() || counts.isNull()) return false;
+  if (means.size() < GNB_CLASSES || vars.size() < GNB_CLASSES) return false;
+
+  memset(gnbMean, 0, sizeof(gnbMean));
+  memset(gnbVar, 0, sizeof(gnbVar));
+  memset(gnbLogPrior, 0, sizeof(gnbLogPrior));
+  memset(gnbClassCount, 0, sizeof(gnbClassCount));
+
+  int present = 0;
+  for (int c = 0; c < GNB_CLASSES; c++) {
+    gnbClassCount[c] = counts[c] | 0;
+    if (gnbClassCount[c] > 0) present++;
+    gnbLogPrior[c] = priors[c] | 0.0f;
+    JsonArray mrow = means[c].as<JsonArray>();
+    JsonArray vrow = vars[c].as<JsonArray>();
+    if (mrow.isNull() || vrow.isNull() || mrow.size() < GNB_FEATS || vrow.size() < GNB_FEATS) {
+      return false;
+    }
+    for (int j = 0; j < GNB_FEATS; j++) {
+      gnbMean[c][j] = mrow[j] | 0.0f;
+      float v = vrow[j] | GNB_VAR_FLOOR;
+      gnbVar[c][j] = (v < GNB_VAR_FLOOR) ? GNB_VAR_FLOOR : v;
+    }
+  }
+  if (present < GNB_MIN_CLASSES) {
+    Serial.println("[GNB] imported model has too few classes");
+    return false;
+  }
+
+  gnbTrainN = doc["trainN"] | 0;
+  gnbReady = true;
+  gnbSufficient = true;
+  gnbFromCloud = true;
+  strncpy(gnbModelSource, "cloud", sizeof(gnbModelSource) - 1);
+  gnbSufficiencyScore = 10;
+  snprintf(gnbStatusMsg, sizeof(gnbStatusMsg), "cloud model n=%d", gnbTrainN);
+  Serial.printf("[GNB] imported cloud model n=%d counts=[%d,%d,%d]\n",
+                gnbTrainN, gnbClassCount[0], gnbClassCount[1], gnbClassCount[2]);
+  return true;
+}
+
+bool saveGnbModelToFs(const String &json) {
+  File f = LittleFS.open(GNB_MODEL_PATH, "w");
+  if (!f) return false;
+  size_t n = f.print(json);
+  f.close();
+  return n == json.length();
+}
+
+bool loadGnbModelFromFs() {
+  if (!LittleFS.exists(GNB_MODEL_PATH)) return false;
+  File f = LittleFS.open(GNB_MODEL_PATH, "r");
+  if (!f) return false;
+  String json = f.readString();
+  f.close();
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, json);
+  if (err) {
+    Serial.printf("[GNB] model file parse error: %s\n", err.c_str());
+    return false;
+  }
+  return applyGnbModelFromDoc(doc);
+}
+
+bool tryImportGnbFromCloud() {
+  if (!cloudConfigured()) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import: cloud disabled");
+    return false;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import: waiting Wi‑Fi");
+    return false;
+  }
+
+  String url = String(CLOUD_BASE_URL) + "/api/devices/" + DEVICE_ID + "/model";
+  bool useTls = strncmp(CLOUD_BASE_URL, "https://", 8) == 0;
+  HTTPClient http;
+  WiFiClientSecure secure;
+  snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "importing GNB…");
+  Serial.printf("[CLOUD] GET model %s\n", url.c_str());
+
+  if (useTls) {
+    secure.setInsecure();
+    if (!http.begin(secure, url)) {
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
+      return false;
+    }
+  } else {
+    if (!http.begin(url)) {
+      snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import begin failed");
+      return false;
+    }
+  }
+
+  http.setTimeout(12000);
+  http.addHeader("Authorization", String("Bearer ") + CLOUD_API_KEY);
+  http.addHeader("X-Device-Id", DEVICE_ID);
+  int code = http.GET();
+  cloudLastHttp = code;
+  String body = http.getString();
+  http.end();
+
+  if (code < 200 || code >= 300) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import fail HTTP %d", code);
+    Serial.printf("[CLOUD] model GET fail %d %s\n", code, body.c_str());
+    return false;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import JSON error");
+    return false;
+  }
+  if (!applyGnbModelFromDoc(doc)) {
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "import apply failed");
+    return false;
+  }
+  saveGnbModelToFs(body);
+  snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "GNB imported OK");
+  return true;
+}
+
+void handleImportGnb() {
+  if (!cloudConfigured()) {
+    server.send(400, "application/json",
+                "{\"ok\":false,\"error\":\"set STA_SSID and CLOUD_BASE_URL in firmware\"}");
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(503, "application/json",
+                "{\"ok\":false,\"error\":\"STA Wi-Fi not connected — join home network on ESP\"}");
+    return;
+  }
+  if (!tryImportGnbFromCloud()) {
+    JsonDocument err;
+    err["ok"] = false;
+    err["error"] = cloudStatusMsg;
+    err["http"] = cloudLastHttp;
+    String out;
+    serializeJson(err, out);
+    server.send(502, "application/json", out);
+    return;
+  }
+  JsonDocument ok;
+  ok["ok"] = true;
+  ok["source"] = gnbModelSource;
+  ok["trainN"] = gnbTrainN;
+  ok["ready"] = gnbReady;
+  ok["status"] = gnbStatusMsg;
+  JsonArray cc = ok["classCounts"].to<JsonArray>();
+  for (int c = 0; c < GNB_CLASSES; c++) cc.add(gnbClassCount[c]);
+  String out;
+  serializeJson(ok, out);
+  server.send(200, "application/json", out);
 }
 
 void collapseBatchToAverage() {
@@ -765,8 +1053,11 @@ void collapseBatchToAverage() {
   hasBatchAvg = true;
   batchCount = 0;  // start next window (avg also kept in dataset)
 
-  if (datasetCount < MAX_DATASET) dataset[datasetCount++] = avg;
-  else {
+  bool reachedFull = false;
+  if (datasetCount < MAX_DATASET) {
+    dataset[datasetCount++] = avg;
+    if (datasetCount == MAX_DATASET) reachedFull = true;
+  } else {
     for (int i = 1; i < MAX_DATASET; i++) dataset[i - 1] = dataset[i];
     dataset[MAX_DATASET - 1] = avg;
   }
@@ -774,10 +1065,18 @@ void collapseBatchToAverage() {
   datasetDirty = true;
   saveDatasetToFs();
 
+  // Upload to Render exactly when the dataset first completes 100 rows
+  if (reachedFull && cloudConfigured()) {
+    cloudUploadPending = true;
+    cloudUploadDone = false;
+    snprintf(cloudStatusMsg, sizeof(cloudStatusMsg), "queued (100/%d)", MAX_DATASET);
+    Serial.println("[CLOUD] dataset full — will upload when STA online");
+  }
+
   if (adaptiveMode) applyAdaptiveThresholds();
 
-  // Retrain GNB whenever a labeled row is added (no-op until statistically sufficient)
-  fitGaussianNB();
+  // Local refit only when not using an imported cloud model
+  if (!gnbFromCloud) fitGaussianNB();
 
   Serial.printf("=== Batch avg → dataset[%d] target=%d (%s) adaptive=%s gnb=%s ===\n",
                 datasetCount - 1, (int)avg.target, targetName(avg.target),
@@ -841,6 +1140,19 @@ void handleStatus() {
   persist["dirty"] = datasetDirty;
   persist["count"] = datasetCount;
 
+  JsonObject cloud = doc["cloud"].to<JsonObject>();
+  cloud["configured"] = cloudConfigured();
+  cloud["pending"] = cloudUploadPending;
+  cloud["done"] = cloudUploadDone;
+  cloud["staConnected"] = WiFi.status() == WL_CONNECTED;
+  cloud["deviceId"] = DEVICE_ID;
+  cloud["url"] = CLOUD_BASE_URL;
+  cloud["lastHttp"] = cloudLastHttp;
+  cloud["status"] = cloudStatusMsg;
+  cloud["trigger"] = "full_100";
+  cloud["gnbSource"] = gnbModelSource;
+  cloud["gnbFromCloud"] = gnbFromCloud;
+
   JsonObject gnb = doc["gnb"].to<JsonObject>();
   gnb["sufficient"] = gnbSufficient;
   gnb["ready"] = gnbReady;
@@ -853,6 +1165,8 @@ void handleStatus() {
   gnb["ruleConfidence"] = ruleConfidence;
   gnb["confMin"] = GNB_CONF_MIN;
   gnb["status"] = gnbStatusMsg;
+  gnb["source"] = gnbModelSource;
+  gnb["fromCloud"] = gnbFromCloud;
   JsonArray cc = gnb["classCounts"].to<JsonArray>();
   for (int c = 0; c < GNB_CLASSES; c++) cc.add(gnbClassCount[c]);
   JsonArray post = gnb["posteriors"].to<JsonArray>();
@@ -938,6 +1252,8 @@ void handleGnb() {
   doc["confidence"] = gnbConfidence;
   doc["ruleConfidence"] = ruleConfidence;
   doc["status"] = gnbStatusMsg;
+  doc["source"] = gnbModelSource;
+  doc["fromCloud"] = gnbFromCloud;
   JsonArray cc = doc["classCounts"].to<JsonArray>();
   for (int c = 0; c < GNB_CLASSES; c++) cc.add(gnbClassCount[c]);
   JsonArray post = doc["posteriors"].to<JsonArray>();
@@ -1123,11 +1439,23 @@ void setupWeb() {
       fitGaussianNB();
       if (adaptiveMode) applyAdaptiveThresholds();
     }
+    // Imported cloud model (if saved) overrides local fit
+    if (loadGnbModelFromFs()) {
+      Serial.println("[GNB] restored imported cloud model from flash");
+    }
+  }
+
+  if (cloudConfigured()) {
+    Serial.printf("Cloud: upload@%d rows + import GNB ← %s (%s)\n",
+                  MAX_DATASET, CLOUD_BASE_URL, DEVICE_ID);
+  } else {
+    Serial.println("Cloud: disabled (set STA_SSID + CLOUD_BASE_URL to enable)");
   }
 
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/dataset", HTTP_GET, handleDataset);
   server.on("/api/gnb", HTTP_GET, handleGnb);
+  server.on("/api/cloud/import-gnb", HTTP_POST, handleImportGnb);
   server.on("/api/thresholds", HTTP_GET, handleGetThresholds);
   server.on("/api/thresholds", HTTP_POST, handlePostThresholds);
   server.on("/api/adaptive", HTTP_POST, handleAdaptive);
@@ -1279,6 +1607,8 @@ void loop() {
   if (batchCount >= BATCH_SIZE) collapseBatchToAverage();
 
   prevTempSlope = slopeForAcc;
+
+  maybeCloudUpload();
 
   // remind if nobody is connected to the SoftAP
   static unsigned long lastApLog = 0;

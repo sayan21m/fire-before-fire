@@ -36,6 +36,7 @@ At idle with no load, **current ≈ 0 A** (and power/risk near zero) is expected
 - Nine-parameter threshold table (manual + adaptive, never below factory defaults)
 - Batch averaging (60 samples) → labeled `dataset[]` with target `0|1|2`
 - **Persists dataset** to LittleFS `/dataset.bin` across power cycles; reloads + refits GNB on boot
+- When the dataset reaches **100 rows**, uploads that full snapshot to a Render cloud API (needs home Wi‑Fi)
 - Sensor health in `/api/status` (`sensors.tempOk`); UI banner when DS18B20 is missing
 - Gaussian NB fit when sufficiency score ≥ 6; overrides rules when confidence is high enough
 - Offline-capable UI (bundled Tailwind CSS; Plotly loads only if the client has internet)
@@ -69,6 +70,37 @@ Labeled `dataset[]` rows (max 100) are written to LittleFS as `/dataset.bin` aft
 | Power cycle / reset            | **Kept**                |
 | `pio run -t upload` (firmware) | **Kept**                |
 | `pio run -t uploadfs`          | **Wiped** (FS rewritten)|
+
+---
+
+## Cloud upload (Render) — only at 100 rows
+
+The ESP does **not** stream every row. When `datasetCount` first hits **100**, it POSTs the full snapshot to your Render service (retries every 2 min until success). SoftAP still works; **home Wi‑Fi (STA)** is required for the upload.
+
+1. Deploy `cloud/` on Render (Web Service, root `cloud`, `npm start`). Set env `CLOUD_API_KEY`.
+2. In `src/main.cpp`:
+
+```cpp
+#define STA_SSID "YourHomeWifi"
+#define STA_PASS "password"
+#define CLOUD_BASE_URL "https://YOUR-SERVICE.onrender.com"
+#define CLOUD_API_KEY "same-as-render-env"
+#define DEVICE_ID "esp32-01"
+```
+
+3. Flash firmware. After a full upload, open **Gaussian NB** → **Import GNB from cloud** (ESP must be on home Wi‑Fi). The model is saved on the device and reused after reboot.
+
+Local test: `cd cloud && npm install && CLOUD_API_KEY=change-me-fbf-key npm start`
+
+| Method | Path | Auth | Description |
+| ------ | ---- | ---- | ----------- |
+| POST | `/api/ingest` | Bearer | Full dataset → fit + store GNB |
+| GET | `/api/devices/:id/model` | Bearer | Download GNB params (ESP import) |
+| POST | `/api/devices/:id/model/refit` | Bearer | Refit from last snapshot |
+| GET | `/api/devices` | Bearer | List devices |
+| GET | `/health` | — | Liveness |
+
+On the ESP SoftAP: `POST /api/cloud/import-gnb` pulls that model.
 
 ---
 
