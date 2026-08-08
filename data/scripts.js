@@ -753,6 +753,77 @@ async function exportHistoryJson() {
   showToast("Exported JSON (history + dataset)");
 }
 
+const DATASET_CSV_COLS = [
+  "i",
+  "current",
+  "temp",
+  "ma3I",
+  "ma3T",
+  "currentSlope",
+  "tempSlope",
+  "varI",
+  "power",
+  "tempAcc",
+  "target",
+  "targetLabel",
+];
+
+async function fetchDatasetPayload() {
+  const data = await api("/api/dataset");
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  return { data, rows };
+}
+
+async function exportDatasetCsv() {
+  try {
+    const { rows } = await fetchDatasetPayload();
+    if (!rows.length) {
+      showToast("No dataset rows yet — wait for a full batch (~60 s)");
+      return;
+    }
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const body = rows
+      .map((r) => DATASET_CSV_COLS.map((k) => esc(r[k])).join(","))
+      .join("\n");
+    downloadBlob(
+      `fbf-dataset-${Date.now()}.csv`,
+      `${DATASET_CSV_COLS.join(",")}\n${body}\n`,
+      "text/csv;charset=utf-8",
+    );
+    showToast(`Exported ${rows.length} dataset rows (CSV)`);
+  } catch (_) {
+    showToast("Dataset export failed — is the ESP32 online?");
+  }
+}
+
+async function exportDatasetJson() {
+  try {
+    const { data, rows } = await fetchDatasetPayload();
+    if (!rows.length) {
+      showToast("No dataset rows yet — wait for a full batch (~60 s)");
+      return;
+    }
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      node: "ESP32 Local Node",
+      legend: data.legend || "target: 0=ok, 1=warn, 2=critical",
+      count: data.count ?? rows.length,
+      max: data.max ?? 100,
+      gnb: data.gnb || null,
+      persist: liveState?.persist || null,
+      rows,
+    };
+    downloadBlob(
+      `fbf-dataset-${Date.now()}.json`,
+      JSON.stringify(payload, null, 2),
+      "application/json",
+    );
+    showToast(`Exported ${rows.length} dataset rows (JSON)`);
+  } catch (_) {
+    showToast("Dataset export failed — is the ESP32 online?");
+  }
+}
+
 function exportHistoryPrint() {
   const rows = filteredHistoryRows();
   const win = window.open("", "_blank");
@@ -863,6 +934,12 @@ function bindHistoryControls() {
   document
     .getElementById("btn-export-print")
     ?.addEventListener("click", exportHistoryPrint);
+  document
+    .getElementById("btn-export-dataset-csv")
+    ?.addEventListener("click", exportDatasetCsv);
+  document
+    .getElementById("btn-export-dataset-json")
+    ?.addEventListener("click", exportDatasetJson);
 }
 
 function bindAutoRefreshToggle() {

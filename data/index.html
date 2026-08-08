@@ -1110,12 +1110,34 @@
                   <p class="page-kicker">Gaussian Naive Bayes</p>
                   <h2 class="page-title">On-device Probabilistic Prediction</h2>
                 </div>
-                <div class="text-right text-xs text-ink-dim">
-                  <div id="bayes-pipeline-status">
-                    Collecting labeled dataset…
+                <div
+                  class="flex flex-col items-stretch sm:items-end gap-2 text-xs text-ink-dim"
+                >
+                  <div class="text-right">
+                    <div id="bayes-pipeline-status">
+                      Collecting labeled dataset…
+                    </div>
+                    <div class="font-mono mt-0.5">
+                      Source: <span id="bayes-source">rules</span>
+                    </div>
                   </div>
-                  <div class="font-mono mt-0.5">
-                    Source: <span id="bayes-source">rules</span>
+                  <div class="flex flex-wrap gap-2 justify-end">
+                    <button
+                      id="btn-export-dataset-csv"
+                      type="button"
+                      class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
+                      title="Download labeled rows as CSV"
+                    >
+                      Dataset CSV
+                    </button>
+                    <button
+                      id="btn-export-dataset-json"
+                      type="button"
+                      class="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-hover transition"
+                      title="Download labeled rows as JSON"
+                    >
+                      Dataset JSON
+                    </button>
                   </div>
                 </div>
               </div>
